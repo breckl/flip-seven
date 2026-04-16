@@ -53,6 +53,8 @@ export function GameClient({ code }: { code: string }) {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState<string>("");
   const [showScores, setShowScores] = useState(false);
+  /** Players list: compact names-only vs full card rows */
+  const [showPlayersCards, setShowPlayersCards] = useState(true);
   /** Cycles 0–3 dots for “Name’s Turn…” while someone is up */
   const [turnDotCount, setTurnDotCount] = useState(0);
   const [secondChanceFlash, setSecondChanceFlash] = useState(false);
@@ -160,10 +162,20 @@ export function GameClient({ code }: { code: string }) {
   const phaseForFlash = playingPayload?.game.state.phase;
 
   useEffect(() => {
+    if (
+      phaseForFlash?.t === "round_summary" ||
+      phaseForFlash?.t === "game_summary" ||
+      phaseForFlash?.t === "game_over"
+    ) {
+      prevSecondChanceRevealSerial.current = null;
+      setSecondChanceSaveFlash(null);
+      return;
+    }
     const c = yourBoardForFlash?.secondChanceRevealCard;
     const ser = c ? JSON.stringify(c) : null;
     if (!ser) {
       prevSecondChanceRevealSerial.current = null;
+      setSecondChanceSaveFlash(null);
       return;
     }
     if (ser === prevSecondChanceRevealSerial.current) return;
@@ -172,7 +184,7 @@ export function GameClient({ code }: { code: string }) {
     setSecondChanceSaveFlash({ numberCard: c });
     const t = window.setTimeout(() => setSecondChanceSaveFlash(null), 3600);
     return () => window.clearTimeout(t);
-  }, [yourBoardForFlash?.secondChanceRevealCard]);
+  }, [yourBoardForFlash?.secondChanceRevealCard, phaseForFlash?.t]);
 
   useEffect(() => {
     if (!yourBoardForFlash || !phaseForFlash) return;
@@ -183,6 +195,7 @@ export function GameClient({ code }: { code: string }) {
       phaseForFlash.t === "bust_reveal"
     ) {
       prevSecondChance.current = yourBoardForFlash.secondChance;
+      setSecondChanceFlash(false);
       return;
     }
     const now = yourBoardForFlash.secondChance;
@@ -192,8 +205,9 @@ export function GameClient({ code }: { code: string }) {
       now === true
     ) {
       setSecondChanceFlash(true);
-      const id = window.setTimeout(() => setSecondChanceFlash(false), 4000);
-      return () => window.clearTimeout(id);
+    }
+    if (now === false) {
+      setSecondChanceFlash(false);
     }
     prevSecondChance.current = now;
   }, [yourBoardForFlash?.secondChance, phaseForFlash?.t]);
@@ -657,8 +671,9 @@ export function GameClient({ code }: { code: string }) {
     const winnerPid =
       ws != null && ws >= 0 && ws < gs.seats.length ? gs.seats[ws] : null;
     const sorted = [...players].sort((a, b) => a.seatOrder - b.seatOrder);
+    const roundHistory = gs.roundScoresHistory ?? [];
     return (
-      <div className="mx-auto max-w-lg px-4 py-16 text-center">
+      <div className="mx-auto max-w-4xl px-4 py-16 text-center">
         <h1 className="text-2xl font-semibold text-stone-900">Game Complete</h1>
         <p className="mt-4 text-lg">
           Winner:{" "}
@@ -670,21 +685,57 @@ export function GameClient({ code }: { code: string }) {
             <span className="text-stone-600">—</span>
           )}
         </p>
-        <ul className="mt-8 space-y-2 text-left">
-          {sorted.map((p) => (
-            <li
-              key={p.id}
-              className={`flex justify-between border-b border-stone-100 py-2 ${
-                winnerPid && p.id === winnerPid
-                  ? "font-bold text-green-700"
-                  : ""
-              }`}
-            >
-              <span>{p.name}</span>
-              <span className="font-mono">{gs.totals[p.id] ?? 0}</span>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-8 overflow-x-auto text-left">
+          <table className="w-full min-w-[280px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-stone-200 text-left text-stone-500">
+                <th className="sticky left-0 bg-white py-2 pr-4 font-medium">
+                  Player
+                </th>
+                {roundHistory.map((h) => (
+                  <th
+                    key={h.roundIndex}
+                    className="whitespace-nowrap px-2 py-2 text-right font-medium"
+                  >
+                    {h.roundIndex}
+                  </th>
+                ))}
+                <th className="whitespace-nowrap py-2 pl-2 text-right font-semibold text-stone-700">
+                  Total
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((p) => (
+                <tr
+                  key={p.id}
+                  className={`border-b border-stone-100 last:border-b-0 ${
+                    winnerPid && p.id === winnerPid ? "font-bold text-green-700" : ""
+                  }`}
+                >
+                  <td
+                    className={`sticky left-0 bg-white py-2 pr-4 ${
+                      winnerPid && p.id === winnerPid ? "text-green-700" : ""
+                    }`}
+                  >
+                    {p.name}
+                  </td>
+                  {roundHistory.map((h) => (
+                    <td
+                      key={h.roundIndex}
+                      className="px-2 py-2 text-right font-mono tabular-nums"
+                    >
+                      {h.scores[p.id] ?? 0}
+                    </td>
+                  ))}
+                  <td className="py-2 pl-2 text-right font-mono font-semibold tabular-nums text-stone-900">
+                    {gs.totals[p.id] ?? 0}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <p className="mt-10">
           <Link
             href="/"
@@ -748,9 +799,22 @@ export function GameClient({ code }: { code: string }) {
           <p className="text-sm font-medium text-stone-500">Your hand</p>
         )}
         {secondChanceFlash ? (
-          <p className="mt-2 text-sm font-medium text-green-700" role="status">
-            Second chance card!
-          </p>
+          <div
+            className="mt-2 flex items-start justify-between gap-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-left"
+            role="status"
+          >
+            <p className="text-sm font-medium text-green-800">
+              Second chance card!
+            </p>
+            <button
+              type="button"
+              onClick={() => setSecondChanceFlash(false)}
+              className="shrink-0 rounded p-0.5 text-lg leading-none text-green-800 hover:bg-green-100/80"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
         ) : null}
         {flipSevenFlash ? (
           <p
@@ -763,25 +827,34 @@ export function GameClient({ code }: { code: string }) {
         ) : null}
         {yourBoard ? (
           <>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {secondChanceSaveFlash ? (
-                <>
-                  <CardShape
-                    card={secondChanceSaveFlash.numberCard}
-                    small
-                    secondChanceSaveFlash
-                  />
-                  <CardShape
-                    card={{ k: "a", v: "second" }}
-                    small
-                    secondChanceSaveFlash
-                  />
-                </>
+            <div className="mt-4 space-y-2">
+              <div className="flex flex-wrap gap-2">
+                {renderBoardNumberRow(yourBoard, yourDupFlash, false)}
+              </div>
+              {secondChanceSaveFlash ||
+              pendingChooserActionCard ||
+              boardHasModsRow(yourBoard) ? (
+                <div className="flex flex-wrap gap-2">
+                  {secondChanceSaveFlash ? (
+                    <>
+                      <CardShape
+                        card={secondChanceSaveFlash.numberCard}
+                        small
+                        secondChanceSaveFlash
+                      />
+                      <CardShape
+                        card={{ k: "a", v: "second" }}
+                        small
+                        secondChanceSaveFlash
+                      />
+                    </>
+                  ) : null}
+                  {pendingChooserActionCard ? (
+                    <CardShape card={pendingChooserActionCard} small />
+                  ) : null}
+                  {renderBoardModsRow(yourBoard)}
+                </div>
               ) : null}
-              {pendingChooserActionCard ? (
-                <CardShape card={pendingChooserActionCard} small />
-              ) : null}
-              {renderBoardLine(yourBoard, yourDupFlash)}
             </div>
             {yourBoard.status === "bust" ? (
               <p
@@ -851,7 +924,16 @@ export function GameClient({ code }: { code: string }) {
       ) : null}
 
       <section className="mt-8 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
-        <p className="text-sm font-medium text-stone-500">Players</p>
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm font-medium text-stone-500">Players</p>
+          <button
+            type="button"
+            onClick={() => setShowPlayersCards((v) => !v)}
+            className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50"
+          >
+            {showPlayersCards ? "Hide Cards" : "Show Cards"}
+          </button>
+        </div>
         <div className="mt-4 space-y-6" aria-label="Players">
           {playersBySeat
             .filter((p) => p.id !== you)
@@ -859,6 +941,7 @@ export function GameClient({ code }: { code: string }) {
               const board = gs.boards[p.id];
               const suffix = doneSuffix(board);
               const isTurn = currentPid === p.id;
+              const otherModsRow = board ? renderBoardModsRow(board) : null;
               return (
                 <div key={p.id}>
                   <p className="text-sm text-stone-700">
@@ -884,11 +967,18 @@ export function GameClient({ code }: { code: string }) {
                       </>
                     )}
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {board
-                      ? renderBoardLine(board, NO_DUP_FLASH)
-                      : null}
-                  </div>
+                  {showPlayersCards && board ? (
+                    <div className="mt-2 space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        {renderBoardNumberRow(board, NO_DUP_FLASH, false)}
+                      </div>
+                      {otherModsRow ? (
+                        <div className="flex flex-wrap gap-2">
+                          {otherModsRow}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -1025,23 +1115,18 @@ function ChooseActionPanel({
   );
 }
 
-function renderBoardLine(
-  board: PlayerBoard,
-  duplicateNumIndices: Set<number> = new Set(),
-  duplicateStatic = false,
-) {
-  const mods: Card[] = [];
-  if (board.hasX2) mods.push({ k: "m", v: "x2" });
-  mods.push(...board.flatMods);
-  const actions: Card[] = [];
-  if (board.secondChance) actions.push({ k: "a", v: "second" });
-  const dupHere = (i: number) => duplicateNumIndices.has(i);
+function boardHasModsRow(board: PlayerBoard): boolean {
+  return board.hasX2 || board.flatMods.length > 0 || board.secondChance;
+}
 
+function renderBoardNumberRow(
+  board: PlayerBoard,
+  duplicateNumIndices: Set<number>,
+  duplicateStatic: boolean,
+) {
+  const dupHere = (i: number) => duplicateNumIndices.has(i);
   return (
     <>
-      {mods.map((c, i) => (
-        <CardShape key={`m-${i}`} card={c} small />
-      ))}
       {board.nums.map((c, i) => (
         <CardShape
           key={`n-${i}`}
@@ -1051,9 +1136,44 @@ function renderBoardLine(
           duplicateHighlight={duplicateStatic && dupHere(i)}
         />
       ))}
+    </>
+  );
+}
+
+/** Modifiers (×2, +flat) and 2nd Chance token — second row; null if nothing to show */
+function renderBoardModsRow(board: PlayerBoard) {
+  const mods: Card[] = [];
+  if (board.hasX2) mods.push({ k: "m", v: "x2" });
+  mods.push(...board.flatMods);
+  const actions: Card[] = [];
+  if (board.secondChance) actions.push({ k: "a", v: "second" });
+  if (mods.length === 0 && actions.length === 0) return null;
+  return (
+    <>
+      {mods.map((c, i) => (
+        <CardShape key={`m-${i}`} card={c} small />
+      ))}
       {actions.map((c, i) => (
         <CardShape key={`a-${i}`} card={c} small />
       ))}
+    </>
+  );
+}
+
+function renderBoardLine(
+  board: PlayerBoard,
+  duplicateNumIndices: Set<number> = new Set(),
+  duplicateStatic = false,
+) {
+  const modsRow = renderBoardModsRow(board);
+  return (
+    <>
+      <div className="flex flex-wrap gap-2">
+        {renderBoardNumberRow(board, duplicateNumIndices, duplicateStatic)}
+      </div>
+      {modsRow ? (
+        <div className="mt-2 flex flex-wrap gap-2">{modsRow}</div>
+      ) : null}
     </>
   );
 }

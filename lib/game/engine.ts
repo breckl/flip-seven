@@ -67,6 +67,7 @@ function emptyBoard(): PlayerBoard {
     hasX2: false,
     secondChance: false,
     status: "active",
+    secondChanceRevealCard: undefined,
   };
 }
 
@@ -283,16 +284,30 @@ function applyNumber(
         ...board,
         nums: [...board.nums, card],
         status: "bust",
+        secondChanceRevealCard: undefined,
       },
       busted: true,
     };
   }
-  return { board: { ...board, nums: [...board.nums, card] }, busted: false };
+  return {
+    board: {
+      ...board,
+      nums: [...board.nums, card],
+      secondChanceRevealCard: undefined,
+    },
+    busted: false,
+  };
 }
 
 function applyModifier(board: PlayerBoard, card: Card & { k: "m" }): PlayerBoard {
-  if (card.v === "x2") return { ...board, hasX2: true };
-  return { ...board, flatMods: [...board.flatMods, card] };
+  if (card.v === "x2") {
+    return { ...board, hasX2: true, secondChanceRevealCard: undefined };
+  }
+  return {
+    ...board,
+    flatMods: [...board.flatMods, card],
+    secondChanceRevealCard: undefined,
+  };
 }
 
 function withBoard(
@@ -373,7 +388,11 @@ function runFlipThree(
     } else if (c.v === "second") {
       const b = s.boards[targetPid];
       if (!b.secondChance) {
-        s = withBoard(s, targetSeat, { ...b, secondChance: true });
+        s = withBoard(s, targetSeat, {
+          ...b,
+          secondChance: true,
+          secondChanceRevealCard: undefined,
+        });
       } else {
         deferred.push(c);
       }
@@ -460,7 +479,11 @@ function applyActionCardAsChooser(
     const tb = s.boards[targetPid];
     if (!isActive(tb)) throw new Error("Invalid target");
     let out = s;
-    out = withBoard(out, targetSeat, { ...tb, status: "frozen" });
+    out = withBoard(out, targetSeat, {
+      ...tb,
+      status: "frozen",
+      secondChanceRevealCard: undefined,
+    });
     out = withPendingTargetAck(out, targetPid, chooserPlayerId, card);
     out = maybeFinishRound(out);
     if (roundOrGameEnded(out.phase)) return out;
@@ -486,7 +509,11 @@ function applyActionCardAsChooser(
     if (tb.secondChance) {
       throw new Error("Pick another player — they already have Second Chance");
     }
-    let out = withBoard(s, targetSeat, { ...tb, secondChance: true });
+    let out = withBoard(s, targetSeat, {
+      ...tb,
+      secondChance: true,
+      secondChanceRevealCard: undefined,
+    });
     if (!soloOnly) {
       out = withPendingTargetAck(out, targetPid, chooserPlayerId, card);
     }
@@ -669,7 +696,11 @@ export function submitStay(state: GameState, playerId: string): GameState {
     ...state0,
     boards: {
       ...state0.boards,
-      [playerId]: { ...b, status: "stayed" as const },
+      [playerId]: {
+        ...b,
+        status: "stayed" as const,
+        secondChanceRevealCard: undefined,
+      },
     },
   };
   s = maybeFinishRound(s);
