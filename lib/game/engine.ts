@@ -34,10 +34,23 @@ function maybeFinishRoundAfterBust(
           t: "bust_reveal",
           roundIndex: state.roundIndex,
           bustedPlayerId,
+          scoringPending: true,
         },
       };
     }
     return applyTotalsAndCheckGameOver(state);
+  }
+  const b = state.boards[bustedPlayerId];
+  if (b?.status === "bust") {
+    return {
+      ...state,
+      phase: {
+        t: "bust_reveal",
+        roundIndex: state.roundIndex,
+        bustedPlayerId,
+        scoringPending: false,
+      },
+    };
   }
   return maybeFinishRound(state);
 }
@@ -55,6 +68,20 @@ function emptyBoard(): PlayerBoard {
     secondChance: false,
     status: "active",
   };
+}
+
+/** Clears transient Second Chance reveal markers before applying a new move (next poll still sees reveal from prior hit). */
+function clearSecondChanceReveals(s: GameState): GameState {
+  let changed = false;
+  const boards = { ...s.boards };
+  for (const id of s.seats) {
+    const b = boards[id];
+    if (b?.secondChanceRevealCard) {
+      boards[id] = { ...b, secondChanceRevealCard: undefined };
+      changed = true;
+    }
+  }
+  return changed ? { ...s, boards } : s;
 }
 
 export function createNewGame(seats: string[], dealerSeat: number): GameState {
@@ -126,6 +153,19 @@ function roundEndedByFlip7(state: GameState): boolean {
 
 function allInactive(state: GameState): boolean {
   return state.seats.every((id) => !isActive(state.boards[id]));
+}
+
+/** Single active player in the round (everyone else bust / stayed / frozen). */
+function onlyActivePlayerId(state: GameState): string | null {
+  let count = 0;
+  let last: string | null = null;
+  for (const id of state.seats) {
+    if (isActive(state.boards[id])) {
+      count += 1;
+      last = id;
+    }
+  }
+  return count === 1 ? last : null;
 }
 
 function collectRoundCardsToDiscard(state: GameState): Card[] {
@@ -229,7 +269,14 @@ function applyNumber(
 ): { board: PlayerBoard; busted: boolean } {
   if (board.nums.some((c) => c.v === card.v)) {
     if (board.secondChance) {
-      return { board: { ...board, secondChance: false }, busted: false };
+      return {
+        board: {
+          ...board,
+          secondChance: false,
+          secondChanceRevealCard: card,
+        },
+        busted: false,
+      };
     }
     return {
       board: {
@@ -342,6 +389,11 @@ function runFlipThree(
   }
   if (roundOrGameEnded(s.phase)) return s;
 
+  /** Flip3 target may have busted; they must not get choose_action for deferred draws. */
+  if (!isActive(s.boards[targetPid])) {
+    return applyResume(s, resume);
+  }
+
   if (deferred.length > 0) {
     const [first, ...rest] = deferred;
     return {
@@ -367,6 +419,10 @@ function afterChooseAction(
   chooserSeat: number
 ): GameState {
   if (deferred && deferred.length > 0) {
+    const chooserPid = pidAt(state, chooserSeat);
+    if (!isActive(state.boards[chooserPid])) {
+      return applyResume(state, resume);
+    }
     const [first, ...rest] = deferred;
     return {
       ...state,
@@ -383,33 +439,34 @@ function afterChooseAction(
   return applyResume(state, resume);
 }
 
-export function submitActionTarget(
-  state: GameState,
+/**
+ * Apply Freeze / Flip 3 / Second Chance to a target after the chooser picked (or solo auto).
+ * When soloOnly, Second Chance skips target notification (card stays in hand until used).
+ */
+function applyActionCardAsChooser(
+  s: GameState,
+  chooserSeat: number,
   chooserPlayerId: string,
-  targetPlayerId: string
+  targetPlayerId: string,
+  card: Card & { k: "a" },
+  resume: ActionResume,
+  deferred: Card[] | undefined,
+  soloOnly: boolean,
 ): GameState {
-  if (state.phase.t !== "choose_action") throw new Error("Not choosing action");
-  const ph = state.phase;
-  if (seatOf(state, chooserPlayerId) !== ph.chooserSeat) {
-    throw new Error("Not your choice");
-  }
-  const card = ph.card;
-  if (card.k !== "a") throw new Error("Invalid card");
-
-  const targetSeat = seatOf(state, targetPlayerId);
+  const targetSeat = seatOf(s, targetPlayerId);
   const targetPid = targetPlayerId;
-  let s = state;
 
   if (card.v === "freeze") {
     const tb = s.boards[targetPid];
     if (!isActive(tb)) throw new Error("Invalid target");
-    s = withBoard(s, targetSeat, { ...tb, status: "frozen" });
-    s = withPendingTargetAck(s, targetPid, chooserPlayerId, card);
-    s = maybeFinishRound(s);
-    if (roundOrGameEnded(s.phase)) return s;
+    let out = s;
+    out = withBoard(out, targetSeat, { ...tb, status: "frozen" });
+    out = withPendingTargetAck(out, targetPid, chooserPlayerId, card);
+    out = maybeFinishRound(out);
+    if (roundOrGameEnded(out.phase)) return out;
     return carryPendingTargetAck(
-      s,
-      afterChooseAction(s, ph.resume, ph.deferred, ph.chooserSeat)
+      out,
+      afterChooseAction(out, resume, deferred, chooserSeat),
     );
   }
 
@@ -419,7 +476,7 @@ export function submitActionTarget(
     return runFlipThree(
       withPendingTargetAck(s, targetPid, chooserPlayerId, card),
       targetSeat,
-      ph.resume
+      resume,
     );
   }
 
@@ -429,23 +486,61 @@ export function submitActionTarget(
     if (tb.secondChance) {
       throw new Error("Pick another player — they already have Second Chance");
     }
-    s = withBoard(s, targetSeat, { ...tb, secondChance: true });
-    s = withPendingTargetAck(s, targetPid, chooserPlayerId, card);
-    s = maybeFinishRound(s);
-    if (roundOrGameEnded(s.phase)) return s;
-    return carryPendingTargetAck(
-      s,
-      afterChooseAction(s, ph.resume, ph.deferred, ph.chooserSeat)
-    );
+    let out = withBoard(s, targetSeat, { ...tb, secondChance: true });
+    if (!soloOnly) {
+      out = withPendingTargetAck(out, targetPid, chooserPlayerId, card);
+    }
+    out = maybeFinishRound(out);
+    if (roundOrGameEnded(out.phase)) return out;
+    if (!soloOnly) {
+      return carryPendingTargetAck(
+        out,
+        afterChooseAction(out, resume, deferred, chooserSeat),
+      );
+    }
+    return afterChooseAction(out, resume, deferred, chooserSeat);
   }
 
   throw new Error("Unhandled action");
 }
 
+export function submitActionTarget(
+  state: GameState,
+  chooserPlayerId: string,
+  targetPlayerId: string
+): GameState {
+  const state0 = clearSecondChanceReveals(state);
+  if (state0.phase.t !== "choose_action") throw new Error("Not choosing action");
+  const ph = state0.phase;
+  if (seatOf(state0, chooserPlayerId) !== ph.chooserSeat) {
+    throw new Error("Not your choice");
+  }
+  const card = ph.card;
+  if (card.k !== "a") throw new Error("Invalid card");
+
+  const only = onlyActivePlayerId(state0);
+  const soloOnly = only !== null && only === chooserPlayerId;
+  const effectiveTargetId = soloOnly ? only : targetPlayerId;
+  if (!state0.seats.includes(effectiveTargetId)) {
+    throw new Error("Invalid target");
+  }
+
+  return applyActionCardAsChooser(
+    state0,
+    ph.chooserSeat,
+    chooserPlayerId,
+    effectiveTargetId,
+    card,
+    ph.resume,
+    ph.deferred,
+    soloOnly,
+  );
+}
+
 export function runDealFromIndex(state: GameState): GameState {
-  const n = state.seats.length;
-  const order = dealSeatOrder(state.dealerSeat, n);
-  let s = state;
+  let s = clearSecondChanceReveals(state);
+  const n = s.seats.length;
+  const order = dealSeatOrder(s.dealerSeat, n);
   let idx = s.phase.t === "initial_deal" ? s.phase.dealIndex : 0;
 
   while (idx < n) {
@@ -458,6 +553,20 @@ export function runDealFromIndex(state: GameState): GameState {
     const card = p.card;
 
     if (card.k === "a") {
+      const pid = pidAt(s, seat);
+      const only = onlyActivePlayerId(s);
+      if (only && only === pid) {
+        return applyActionCardAsChooser(
+          s,
+          seat,
+          pid,
+          pid,
+          card,
+          { kind: "deal", nextDealIndex: idx + 1 },
+          undefined,
+          true,
+        );
+      }
       return {
         ...s,
         phase: {
@@ -490,13 +599,14 @@ export function runDealFromIndex(state: GameState): GameState {
 }
 
 export function submitHit(state: GameState, playerId: string): GameState {
-  if (state.phase.t !== "play") throw new Error("Not in play");
-  const seat = seatOf(state, playerId);
-  if (state.phase.currentTurnSeat !== seat) throw new Error("Not your turn");
-  const b = state.boards[playerId];
+  let s0 = clearSecondChanceReveals(state);
+  if (s0.phase.t !== "play") throw new Error("Not in play");
+  const seat = seatOf(s0, playerId);
+  if (s0.phase.currentTurnSeat !== seat) throw new Error("Not your turn");
+  const b = s0.boards[playerId];
   if (!isActive(b)) throw new Error("Not active");
 
-  const p = popDraw(state);
+  const p = popDraw(s0);
   if (!p.card) throw new Error("Deck empty");
   let s = p.state;
   const card = p.card;
@@ -520,6 +630,22 @@ export function submitHit(state: GameState, playerId: string): GameState {
     return advanceTurnAfter(s, seat);
   }
 
+  if (card.k === "a") {
+    const only = onlyActivePlayerId(s);
+    if (only && only === playerId) {
+      return applyActionCardAsChooser(
+        s,
+        seat,
+        playerId,
+        playerId,
+        card,
+        { kind: "hit", hitSeat: seat },
+        undefined,
+        true,
+      );
+    }
+  }
+
   return {
     ...s,
     phase: {
@@ -533,15 +659,16 @@ export function submitHit(state: GameState, playerId: string): GameState {
 }
 
 export function submitStay(state: GameState, playerId: string): GameState {
-  if (state.phase.t !== "play") throw new Error("Not in play");
-  const seat = seatOf(state, playerId);
-  if (state.phase.currentTurnSeat !== seat) throw new Error("Not your turn");
-  const b = state.boards[playerId];
+  const state0 = clearSecondChanceReveals(state);
+  if (state0.phase.t !== "play") throw new Error("Not in play");
+  const seat = seatOf(state0, playerId);
+  if (state0.phase.currentTurnSeat !== seat) throw new Error("Not your turn");
+  const b = state0.boards[playerId];
   if (!isActive(b)) throw new Error("Not active");
   let s = {
-    ...state,
+    ...state0,
     boards: {
-      ...state.boards,
+      ...state0.boards,
       [playerId]: { ...b, status: "stayed" as const },
     },
   };
@@ -572,7 +699,11 @@ export function submitAckBustReveal(
   if (state.phase.bustedPlayerId !== playerId) {
     throw new Error("Only the busted player can acknowledge");
   }
-  return applyTotalsAndCheckGameOver(state);
+  const scoringPending = state.phase.scoringPending !== false;
+  if (scoringPending) {
+    return applyTotalsAndCheckGameOver(state);
+  }
+  return advanceTurnAfter(state, seatOf(state, playerId));
 }
 
 export function submitAckRoundSummary(

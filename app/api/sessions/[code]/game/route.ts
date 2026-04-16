@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { connectionFailureResponse } from "@/lib/server/db-error-response";
 import { findSessionByCode, getPlayingSessionBody, listPlayers } from "@/lib/server/session-queries";
 
 export const dynamic = "force-dynamic";
@@ -15,39 +16,53 @@ export async function GET(_req: Request, ctx: RouteParams) {
   const { code: raw } = ctx.params;
   const code = raw.trim().toUpperCase();
 
-  const session = await findSessionByCode(code);
-  if (!session) {
-    return NextResponse.json(
-      { error: "Session not found" },
-      { status: 404, headers: noCache }
-    );
-  }
+  try {
+    const session = await findSessionByCode(code);
+    if (!session) {
+      return NextResponse.json(
+        { error: "Session not found" },
+        { status: 404, headers: noCache }
+      );
+    }
 
-  if (session.status === "lobby") {
-    const players = await listPlayers(session.id);
-    return NextResponse.json(
-      {
-        status: session.status,
-        code: session.code,
-        expectedPlayerCount: session.expectedPlayerCount,
-        hostPlayerId: session.hostPlayerId,
-        players: players.map((p) => ({
-          id: p.id,
-          name: p.name,
-          seatOrder: p.seatOrder,
-        })),
-      },
-      { headers: noCache }
-    );
-  }
+    if (session.status === "lobby") {
+      const players = await listPlayers(session.id);
+      return NextResponse.json(
+        {
+          status: session.status,
+          code: session.code,
+          hostPlayerId: session.hostPlayerId,
+          players: players.map((p) => ({
+            id: p.id,
+            name: p.name,
+            seatOrder: p.seatOrder,
+          })),
+        },
+        { headers: noCache }
+      );
+    }
 
-  const payload = await getPlayingSessionBody(session);
-  if (!payload) {
+    const payload = await getPlayingSessionBody(session);
+    if (!payload) {
+      return NextResponse.json(
+        { error: "Game missing" },
+        { status: 500, headers: noCache }
+      );
+    }
+
+    return NextResponse.json(payload, { headers: noCache });
+  } catch (e) {
+    const conn = connectionFailureResponse(e);
+    if (conn) {
+      for (const [k, v] of Object.entries(noCache)) {
+        conn.headers.set(k, String(v));
+      }
+      return conn;
+    }
+    console.error("GET /api/sessions/[code]/game", e);
     return NextResponse.json(
-      { error: "Game missing" },
+      { error: "Database error" },
       { status: 500, headers: noCache }
     );
   }
-
-  return NextResponse.json(payload, { headers: noCache });
 }

@@ -4,6 +4,23 @@ export function uniqueNumberCount(nums: Card[]): number {
   return new Set(nums.map((c) => c.v)).size;
 }
 
+/** Indices of number cards that participate in a duplicate (value appears 2+ times). */
+export function duplicateNumberIndices(nums: Card[]): Set<number> {
+  const count = new Map<number, number>();
+  for (const c of nums) {
+    if (c.k === "n") count.set(c.v, (count.get(c.v) ?? 0) + 1);
+  }
+  const dupValues = new Set<number>();
+  for (const [v, n] of count) {
+    if (n >= 2) dupValues.add(v);
+  }
+  const out = new Set<number>();
+  nums.forEach((c, i) => {
+    if (c.k === "n" && dupValues.has(c.v)) out.add(i);
+  });
+  return out;
+}
+
 /** True when the player has 7 different number values on number cards (modifiers / ×2 / actions don’t count). */
 export function hasFlipSeven(nums: Card[]): boolean {
   return uniqueNumberCount(nums) >= 7;
@@ -35,7 +52,7 @@ export function cardLabel(c: Card): string {
   }
   if (c.v === "freeze") return "Freeze";
   if (c.v === "flip3") return "Flip 3";
-  return "2nd";
+  return "2nd Chance";
 }
 
 export function isActive(board: PlayerBoard): boolean {

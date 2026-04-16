@@ -7,7 +7,6 @@ import type { GameState } from "@/lib/game/types";
 export type PlayingSessionBody = {
   status: "playing" | "finished";
   code: string;
-  expectedPlayerCount: number;
   hostPlayerId: string | null;
   players: { id: string; name: string; seatOrder: number }[];
   game: { version: number; updatedAt: string; state: GameState };
@@ -51,7 +50,6 @@ export async function getPlayingSessionBody(
   return {
     status: session.status,
     code: session.code,
-    expectedPlayerCount: session.expectedPlayerCount,
     hostPlayerId: session.hostPlayerId,
     players: players.map((p) => ({
       id: p.id,

@@ -34,12 +34,9 @@ export async function POST(req: Request, ctx: RouteParams) {
   }
 
   const plist = await listPlayers(session.id);
-  if (plist.length < 3) {
-    return NextResponse.json({ error: "Need at least 3 players" }, { status: 400 });
-  }
-  if (plist.length !== session.expectedPlayerCount) {
+  if (plist.length < 2) {
     return NextResponse.json(
-      { error: "Wait until all players have joined" },
+      { error: "Need at least 2 players to start" },
       { status: 400 }
     );
   }

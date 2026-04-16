@@ -35,7 +35,8 @@ export async function POST(req: Request, ctx: RouteParams) {
     .from(players)
     .where(eq(players.sessionId, session.id));
   const count = existing[0]?.c ?? 0;
-  if (count >= session.expectedPlayerCount) {
+  const maxPlayers = 18;
+  if (count >= maxPlayers) {
     return NextResponse.json({ error: "Lobby is full" }, { status: 409 });
   }
 

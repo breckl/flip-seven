@@ -14,7 +14,6 @@ export const sessions = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     code: text("code").notNull(),
     status: text("status").notNull().$type<"lobby" | "playing" | "finished">(),
-    expectedPlayerCount: integer("expected_player_count").notNull(),
     hostPlayerId: uuid("host_player_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

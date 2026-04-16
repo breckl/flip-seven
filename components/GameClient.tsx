@@ -5,20 +5,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CardShape } from "@/components/CardShape";
 import { useDuplicateFlash } from "@/components/useDuplicateFlash";
 import { loadPlayerId, savePlayerBinding } from "@/lib/client/player-storage";
-import { cardLabel, hasFlipSeven } from "@/lib/game/rules";
-import type {
-  Card,
-  GamePhase,
-  GameState,
-  PlayerBoard,
-} from "@/lib/game/types";
+import { PrimaryButton } from "@/components/ui/PrimaryButton";
+import {
+  cardLabel,
+  duplicateNumberIndices,
+  hasFlipSeven,
+} from "@/lib/game/rules";
+import type { Card, GamePhase, GameState, PlayerBoard } from "@/lib/game/types";
 
 type PlayerRow = { id: string; name: string; seatOrder: number };
 
 type LobbyPayload = {
   status: "lobby";
   code: string;
-  expectedPlayerCount: number;
   hostPlayerId: string | null;
   players: PlayerRow[];
 };
@@ -26,7 +25,6 @@ type LobbyPayload = {
 type PlayingPayload = {
   status: "playing" | "finished";
   code: string;
-  expectedPlayerCount: number;
   hostPlayerId: string | null;
   players: PlayerRow[];
   game: { version: number; state: GameState; updatedAt: string };
@@ -55,12 +53,16 @@ export function GameClient({ code }: { code: string }) {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState<string>("");
   const [showScores, setShowScores] = useState(false);
-  /** Which player’s table row is shown in the top “tabs” panel */
-  const [viewedPlayerId, setViewedPlayerId] = useState<string | null>(null);
+  /** Cycles 0–3 dots for “Name’s Turn…” while someone is up */
+  const [turnDotCount, setTurnDotCount] = useState(0);
   const [secondChanceFlash, setSecondChanceFlash] = useState(false);
   const prevSecondChance = useRef<boolean | null>(null);
   const [flipSevenFlash, setFlipSevenFlash] = useState(false);
   const prevFlipSeven = useRef<boolean | null>(null);
+  const [secondChanceSaveFlash, setSecondChanceSaveFlash] = useState<{
+    numberCard: Card;
+  } | null>(null);
+  const prevSecondChanceRevealSerial = useRef<string | null>(null);
   const [lobbyShareUrl, setLobbyShareUrl] = useState("");
 
   const c = code.toUpperCase();
@@ -82,7 +84,7 @@ export function GameClient({ code }: { code: string }) {
   const playersBySeat = useMemo(() => {
     if (!playingPayload) return [] as PlayerRow[];
     return [...playingPayload.players].sort(
-      (a, b) => a.seatOrder - b.seatOrder
+      (a, b) => a.seatOrder - b.seatOrder,
     );
   }, [playingPayload]);
 
@@ -98,6 +100,18 @@ export function GameClient({ code }: { code: string }) {
     return null;
   }, [playingPayload]);
 
+  /** Freeze / Flip 3 while the chooser must pick a target — show in hand until they confirm */
+  const pendingChooserActionCard = useMemo(() => {
+    if (!playingPayload || !playerId) return null;
+    const gs = playingPayload.game.state;
+    if (gs.phase.t !== "choose_action") return null;
+    if (gs.seats.indexOf(playerId) !== gs.phase.chooserSeat) return null;
+    const card = gs.phase.card;
+    if (card.k !== "a") return null;
+    if (card.v !== "freeze" && card.v !== "flip3") return null;
+    return card;
+  }, [playingPayload, playerId]);
+
   const summaryPhase =
     !!playingPayload &&
     (playingPayload.game.state.phase.t === "round_summary" ||
@@ -106,16 +120,28 @@ export function GameClient({ code }: { code: string }) {
 
   const yourBoardNumsForFlash = useMemo(() => {
     if (!playingPayload || summaryPhase || !playerId) return undefined;
+    const phase = playingPayload.game.state.phase;
+    if (phase.t === "bust_reveal") return undefined;
     return playingPayload.game.state.boards[playerId]?.nums;
   }, [playingPayload, summaryPhase, playerId]);
 
   const yourDupFlash = useDuplicateFlash(
     yourBoardNumsForFlash,
-    `you-${playerId ?? ""}`
+    `you-${playerId ?? ""}`,
   );
 
   useEffect(() => {
-    if (turnPlayerId) setViewedPlayerId(turnPlayerId);
+    setTurnDotCount(0);
+  }, [turnPlayerId]);
+
+  useEffect(() => {
+    if (!turnPlayerId) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      setTurnDotCount((c) => (c >= 3 ? 0 : c + 1));
+    }, 500);
+    return () => window.clearInterval(id);
   }, [turnPlayerId]);
 
   useEffect(() => {
@@ -132,6 +158,21 @@ export function GameClient({ code }: { code: string }) {
       ? playingPayload.game.state.boards[playerId]
       : undefined;
   const phaseForFlash = playingPayload?.game.state.phase;
+
+  useEffect(() => {
+    const c = yourBoardForFlash?.secondChanceRevealCard;
+    const ser = c ? JSON.stringify(c) : null;
+    if (!ser) {
+      prevSecondChanceRevealSerial.current = null;
+      return;
+    }
+    if (ser === prevSecondChanceRevealSerial.current) return;
+    if (c?.k !== "n") return;
+    prevSecondChanceRevealSerial.current = ser;
+    setSecondChanceSaveFlash({ numberCard: c });
+    const t = window.setTimeout(() => setSecondChanceSaveFlash(null), 3600);
+    return () => window.clearTimeout(t);
+  }, [yourBoardForFlash?.secondChanceRevealCard]);
 
   useEffect(() => {
     if (!yourBoardForFlash || !phaseForFlash) return;
@@ -173,21 +214,13 @@ export function GameClient({ code }: { code: string }) {
     const now =
       hasFlipSeven(yourBoardForFlash.nums) &&
       yourBoardForFlash.status !== "bust";
-    if (
-      prevFlipSeven.current !== null &&
-      !prevFlipSeven.current &&
-      now
-    ) {
+    if (prevFlipSeven.current !== null && !prevFlipSeven.current && now) {
       setFlipSevenFlash(true);
       const id = window.setTimeout(() => setFlipSevenFlash(false), 6000);
       return () => window.clearTimeout(id);
     }
     prevFlipSeven.current = now;
-  }, [
-    yourBoardForFlash?.nums,
-    yourBoardForFlash?.status,
-    phaseForFlash?.t,
-  ]);
+  }, [yourBoardForFlash?.nums, yourBoardForFlash?.status, phaseForFlash?.t]);
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/sessions/${c}/game`, { cache: "no-store" });
@@ -255,24 +288,29 @@ export function GameClient({ code }: { code: string }) {
       }
       await refresh();
     },
-    [c, playerId, refresh]
+    [c, playerId, refresh],
   );
 
-  /** Self-targeted action: skip the notify modal and ack immediately */
-  const pendingAck = playingPayload?.game.state.pendingTargetAck;
-  const selfTargetAckStarted = useRef(false);
+  /** Sole remaining active player: auto-submit action target (server applies to self) */
+  const autoOnlyTargetKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!pendingAck) {
-      selfTargetAckStarted.current = false;
+    if (!playingPayload || !playerId) return;
+    const gs = playingPayload.game.state;
+    if (gs.phase.t !== "choose_action") {
+      autoOnlyTargetKeyRef.current = null;
       return;
     }
-    if (!playerId) return;
-    if (pendingAck.targetPlayerId !== playerId) return;
-    if (pendingAck.actorPlayerId !== pendingAck.targetPlayerId) return;
-    if (selfTargetAckStarted.current) return;
-    selfTargetAckStarted.current = true;
-    void postMove({ type: "ACK_TARGET_NOTIFY" });
-  }, [pendingAck, playerId, postMove]);
+    if (gs.seats.indexOf(playerId) !== gs.phase.chooserSeat) return;
+    if (activeTargets.length !== 1) return;
+    const ph = gs.phase;
+    const key = `${playingPayload.game.version}-${ph.chooserSeat}-${JSON.stringify(ph.card)}-${(ph.deferred ?? []).length}`;
+    if (autoOnlyTargetKeyRef.current === key) return;
+    autoOnlyTargetKeyRef.current = key;
+    void postMove({
+      type: "ACTION_TARGET",
+      targetPlayerId: activeTargets[0].id,
+    });
+  }, [playingPayload, playerId, activeTargets, postMove]);
 
   const startGame = async () => {
     if (!playerId) return;
@@ -296,20 +334,17 @@ export function GameClient({ code }: { code: string }) {
   }
 
   if (data.status === "lobby") {
-    const full = data.players.length >= data.expectedPlayerCount;
+    const canStart = data.players.length >= 2;
     const isHost = playerId && data.hostPlayerId === playerId;
-    const myName = playerId
-      ? data.players.find((p) => p.id === playerId)?.name
+    const hostName = data.hostPlayerId
+      ? data.players.find((p) => p.id === data.hostPlayerId)?.name
       : null;
     return (
       <div className="mx-auto max-w-lg px-4 py-10">
-        {myName ? (
-          <p className="mb-4 rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm text-stone-700">
-            You: <span className="font-semibold text-stone-900">{myName}</span>
-          </p>
-        ) : null}
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <h1 className="text-2xl font-semibold text-stone-900">Lobby</h1>
+          <h1 className="text-2xl font-semibold text-stone-900">
+            {hostName ? `${hostName}'s Lobby` : "Lobby"}
+          </h1>
           <button
             type="button"
             onClick={() => void refresh()}
@@ -325,8 +360,8 @@ export function GameClient({ code }: { code: string }) {
           </span>
         </p>
         <p className="mt-1 text-sm text-stone-500">
-          Players {data.players.length} / {data.expectedPlayerCount} (minimum 3
-          to play; this table waits until everyone has joined)
+          {data.players.length} player{data.players.length === 1 ? "" : "s"}{" "}
+          (minimum 2 players)
         </p>
         {isHost && lobbyShareUrl ? (
           <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50/90 p-4 text-left">
@@ -355,16 +390,17 @@ export function GameClient({ code }: { code: string }) {
           ))}
         </ul>
         {isHost ? (
-          <button
-            type="button"
+          <PrimaryButton
             onClick={() => void startGame()}
-            disabled={!full}
-            className="mt-8 w-full rounded-xl bg-amber-600 px-4 py-3 text-white disabled:opacity-40"
+            disabled={!canStart}
+            className="mt-8 w-full"
           >
-            {full ? "Start game" : "Waiting for all players"}
-          </button>
+            {canStart ? "Start game" : "Need at least 2 players to start"}
+          </PrimaryButton>
         ) : (
-          <p className="mt-8 text-sm text-stone-500">Waiting for host to start…</p>
+          <p className="mt-8 text-sm text-stone-500">
+            Waiting for host to start…
+          </p>
         )}
         {err ? <p className="mt-4 text-sm text-red-600">{err}</p> : null}
       </div>
@@ -384,11 +420,9 @@ export function GameClient({ code }: { code: string }) {
   const you = playerId;
 
   const pendingTarget = gs.pendingTargetAck;
-  if (
-    pendingTarget &&
-    you === pendingTarget.targetPlayerId &&
-    pendingTarget.actorPlayerId !== pendingTarget.targetPlayerId
-  ) {
+  if (pendingTarget && you === pendingTarget.targetPlayerId) {
+    const selfTarget =
+      pendingTarget.actorPlayerId === pendingTarget.targetPlayerId;
     const actorName =
       players.find((p) => p.id === pendingTarget.actorPlayerId)?.name ??
       "A player";
@@ -398,23 +432,30 @@ export function GameClient({ code }: { code: string }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h2 className="text-xl font-semibold text-stone-900">
-              You were targeted
+              {selfTarget ? "Card applied" : "You were targeted"}
             </h2>
             <p className="mt-3 text-stone-700">
-              <span className="font-semibold">{actorName}</span> played{" "}
-              <span className="font-semibold">{cardName}</span> on you.
+              {selfTarget ? (
+                <>
+                  You&apos;re the only player still in this round.{" "}
+                  <span className="font-semibold">{cardName}</span> was applied
+                  to you.
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold">{actorName}</span> played{" "}
+                  <span className="font-semibold">{cardName}</span> on you.
+                </>
+              )}
             </p>
-            <button
-              type="button"
+            <PrimaryButton
               disabled={!you}
               onClick={() => void postMove({ type: "ACK_TARGET_NOTIFY" })}
-              className="mt-8 w-full rounded-xl bg-stone-900 px-4 py-3 text-white disabled:opacity-50"
+              className="mt-8 w-full"
             >
               Ok
-            </button>
-            {err ? (
-              <p className="mt-4 text-sm text-red-600">{err}</p>
-            ) : null}
+            </PrimaryButton>
+            {err ? <p className="mt-4 text-sm text-red-600">{err}</p> : null}
           </div>
         </div>
       </div>
@@ -435,22 +476,22 @@ export function GameClient({ code }: { code: string }) {
             {isBustedYou && bustedBoard ? (
               <>
                 <h2 className="text-xl font-semibold text-stone-900">
-                  You&apos;re out!
+                  You drew a duplicate. You&apos;re out!
                 </h2>
-                <p className="mt-2 text-sm text-stone-600">
-                  You drew a duplicate. Review your cards, then continue.
-                </p>
                 <div className="mt-6 flex flex-wrap gap-2">
-                  {renderBoardLine(bustedBoard, yourDupFlash)}
+                  {renderBoardLine(
+                    bustedBoard,
+                    duplicateNumberIndices(bustedBoard.nums),
+                    true,
+                  )}
                 </div>
-                <button
-                  type="button"
+                <PrimaryButton
                   disabled={!you}
                   onClick={() => void postMove({ type: "ACK_BUST_REVEAL" })}
-                  className="mt-8 w-full rounded-xl bg-stone-900 px-4 py-3 text-white disabled:opacity-50"
+                  className="mt-8 w-full"
                 >
                   Ok
-                </button>
+                </PrimaryButton>
                 {err ? (
                   <p className="mt-4 text-sm text-red-600">{err}</p>
                 ) : null}
@@ -519,14 +560,13 @@ export function GameClient({ code }: { code: string }) {
                 ))}
               </tbody>
             </table>
-            <button
-              type="button"
+            <PrimaryButton
               disabled={acked || !you}
               onClick={() => void postMove({ type: "ACK_ROUND_SUMMARY" })}
-              className="mt-8 w-full rounded-xl bg-amber-600 px-4 py-3 text-white disabled:opacity-50"
+              className="mt-8 w-full"
             >
               {acked ? "Waiting for other players…" : "Start Next Round"}
-            </button>
+            </PrimaryButton>
           </div>
         </div>
       </div>
@@ -546,7 +586,9 @@ export function GameClient({ code }: { code: string }) {
       <div className="mx-auto max-w-lg px-4 py-8">
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
           <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl bg-white p-6 shadow-xl">
-            <h2 className="text-xl font-semibold text-stone-900">Game Complete</h2>
+            <h2 className="text-xl font-semibold text-stone-900">
+              Game Complete
+            </h2>
             <p className="mt-1 text-sm text-stone-500">
               {ph.acknowledged.length} / {players.length} players acknowledged
             </p>
@@ -571,10 +613,14 @@ export function GameClient({ code }: { code: string }) {
                     <tr
                       key={p.id}
                       className={
-                        win ? "border-b border-stone-100 font-bold text-green-700" : "border-b border-stone-100"
+                        win
+                          ? "border-b border-stone-100 font-bold text-green-700"
+                          : "border-b border-stone-100"
                       }
                     >
-                      <td className={`py-2 pr-2 ${win ? "text-green-700" : ""}`}>
+                      <td
+                        className={`py-2 pr-2 ${win ? "text-green-700" : ""}`}
+                      >
                         {p.name}
                         {win ? " — Winner" : ""}
                       </td>
@@ -593,14 +639,13 @@ export function GameClient({ code }: { code: string }) {
                 })}
               </tbody>
             </table>
-            <button
-              type="button"
+            <PrimaryButton
               disabled={acked || !you}
               onClick={() => void postMove({ type: "ACK_GAME_SUMMARY" })}
-              className="mt-8 w-full rounded-xl bg-green-700 px-4 py-3 text-white disabled:opacity-50"
+              className="mt-8 w-full"
             >
               {acked ? "Waiting for other players…" : "Done"}
-            </button>
+            </PrimaryButton>
           </div>
         </div>
       </div>
@@ -630,7 +675,9 @@ export function GameClient({ code }: { code: string }) {
             <li
               key={p.id}
               className={`flex justify-between border-b border-stone-100 py-2 ${
-                winnerPid && p.id === winnerPid ? "font-bold text-green-700" : ""
+                winnerPid && p.id === winnerPid
+                  ? "font-bold text-green-700"
+                  : ""
               }`}
             >
               <span>{p.name}</span>
@@ -658,18 +705,20 @@ export function GameClient({ code }: { code: string }) {
         : null;
 
   const currentPid =
-    currentSeat !== null ? gs.seats[currentSeat] ?? null : null;
+    currentSeat !== null ? (gs.seats[currentSeat] ?? null) : null;
 
   const yourBoard = you ? gs.boards[you] : undefined;
 
   const totals = gs.totals;
   const myName = you ? players.find((p) => p.id === you)?.name : null;
 
-  const viewPid =
-    viewedPlayerId && players.some((p) => p.id === viewedPlayerId)
-      ? viewedPlayerId
-      : playersBySeat[0]?.id ?? null;
-  const viewedBoard = viewPid ? gs.boards[viewPid] : undefined;
+  const playDisabled =
+    gs.phase.t === "play" &&
+    !!you &&
+    (gs.phase.currentTurnSeat !== gs.seats.indexOf(you) ||
+      gs.boards[you].status !== "active");
+
+  const isYourTurn = !!you && currentPid === you;
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -691,61 +740,23 @@ export function GameClient({ code }: { code: string }) {
       </div>
 
       <section className="mt-8 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
-        <p className="text-sm font-medium text-stone-500">Table</p>
-        <div
-          className="mt-3 flex gap-1 overflow-x-auto border-b border-stone-200 pb-px"
-          role="tablist"
-          aria-label="Players"
-        >
-            {playersBySeat.map((p) => {
-            const board = gs.boards[p.id];
-            const suffix = doneSuffix(board);
-            const isTurn = currentPid === p.id;
-            const isView = viewPid === p.id;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                role="tab"
-                aria-selected={isView}
-                onClick={() => setViewedPlayerId(p.id)}
-                className={`shrink-0 whitespace-nowrap rounded-t-lg border border-b-0 px-3 py-2 text-left text-sm transition-colors ${
-                  isTurn
-                    ? "border-transparent bg-[#DFF5EA] font-semibold text-stone-900"
-                    : isView
-                      ? "border-stone-400 bg-white text-stone-900 shadow-sm"
-                      : "border-transparent bg-stone-100/80 text-stone-600 hover:bg-stone-100"
-                }`}
-              >
-                {p.name}
-                {suffix ? (
-                  <span className="font-normal text-stone-500"> {suffix}</span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-        {viewPid && viewedBoard ? (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {renderBoardLine(
-              viewedBoard,
-              viewPid === you ? yourDupFlash : NO_DUP_FLASH
-            )}
-          </div>
+        {isYourTurn ? (
+          <p className="text-sm font-bold text-stone-900">
+            Your Turn{".".repeat(turnDotCount)}
+          </p>
         ) : (
-          <p className="mt-2 text-sm text-stone-400">—</p>
+          <p className="text-sm font-medium text-stone-500">Your hand</p>
         )}
-      </section>
-
-      <section className="mt-8 rounded-2xl border border-stone-200 bg-amber-50/50 p-4">
-        <p className="text-sm font-medium text-stone-600">Your hand</p>
         {secondChanceFlash ? (
           <p className="mt-2 text-sm font-medium text-green-700" role="status">
             Second chance card!
           </p>
         ) : null}
         {flipSevenFlash ? (
-          <p className="mt-2 text-sm font-medium text-emerald-800" role="status">
+          <p
+            className="mt-2 text-sm font-medium text-emerald-800"
+            role="status"
+          >
             Flip 7! You have 7 different numbers — +15 bonus points, and the
             round ends when play catches up.
           </p>
@@ -753,66 +764,135 @@ export function GameClient({ code }: { code: string }) {
         {yourBoard ? (
           <>
             <div className="mt-4 flex flex-wrap gap-2">
+              {secondChanceSaveFlash ? (
+                <>
+                  <CardShape
+                    card={secondChanceSaveFlash.numberCard}
+                    small
+                    secondChanceSaveFlash
+                  />
+                  <CardShape
+                    card={{ k: "a", v: "second" }}
+                    small
+                    secondChanceSaveFlash
+                  />
+                </>
+              ) : null}
+              {pendingChooserActionCard ? (
+                <CardShape card={pendingChooserActionCard} small />
+              ) : null}
               {renderBoardLine(yourBoard, yourDupFlash)}
             </div>
             {yourBoard.status === "bust" ? (
-              <p className="mt-3 text-sm font-medium text-red-700" role="status">
+              <p
+                className="mt-3 text-sm font-medium text-red-700"
+                role="status"
+              >
                 You&apos;re out!
               </p>
             ) : null}
           </>
         ) : (
-          <p className="mt-2 text-sm text-stone-500">Join this device to see your hand.</p>
+          <p className="mt-2 text-sm text-stone-500">
+            Join this device to see your hand.
+          </p>
         )}
       </section>
 
-      <section className="mt-8 space-y-3">
-        {gs.phase.t === "play" && you && (
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              disabled={
-                gs.phase.currentTurnSeat !== gs.seats.indexOf(you) ||
-                gs.boards[you].status !== "active"
-              }
-              onClick={() => void postMove({ type: "HIT" })}
-              className="flex-1 rounded-xl bg-stone-900 px-4 py-3 text-white disabled:opacity-40"
-            >
-              Hit
-            </button>
-            <button
-              type="button"
-              disabled={
-                gs.phase.currentTurnSeat !== gs.seats.indexOf(you) ||
-                gs.boards[you].status !== "active"
-              }
-              onClick={() => void postMove({ type: "STAY" })}
-              className="flex-1 rounded-xl border border-stone-300 bg-white px-4 py-3 disabled:opacity-40"
-            >
-              Stay
-            </button>
-          </div>
-        )}
+      {(gs.phase.t === "play" && you) ||
+      (gs.phase.t === "choose_action" && you) ||
+      err ? (
+        <div className="mt-8 space-y-4">
+          {gs.phase.t === "play" && you ? (
+            <div className="flex flex-wrap gap-3">
+              <PrimaryButton
+                disabled={playDisabled}
+                onClick={() => void postMove({ type: "HIT" })}
+                className="flex-1"
+              >
+                Hit
+              </PrimaryButton>
+              <PrimaryButton
+                variant="secondary"
+                disabled={playDisabled}
+                onClick={() => void postMove({ type: "STAY" })}
+                className="flex-1"
+              >
+                Stay
+              </PrimaryButton>
+            </div>
+          ) : null}
 
-        {gs.phase.t === "choose_action" && you && (
-          <ChooseActionPanel
-            phase={gs.phase}
-            you={you}
-            seats={gs.seats}
-            players={players}
-            activeTargets={activeTargets}
-            targetId={targetId}
-            setTargetId={setTargetId}
-            onConfirm={() => {
-              void postMove({
-                type: "ACTION_TARGET",
-                targetPlayerId: targetId,
-              });
-            }}
-          />
-        )}
+          {gs.phase.t === "choose_action" && you ? (
+            <section
+              className="space-y-3 rounded-2xl border-2 border-[rgb(89_197_143)] bg-[#DFF5EA] p-4 shadow-sm"
+              aria-label="Card action"
+            >
+              <ChooseActionPanel
+                phase={gs.phase}
+                you={you}
+                seats={gs.seats}
+                players={players}
+                activeTargets={activeTargets}
+                targetId={targetId}
+                setTargetId={setTargetId}
+                onConfirm={() => {
+                  void postMove({
+                    type: "ACTION_TARGET",
+                    targetPlayerId: targetId,
+                  });
+                }}
+              />
+            </section>
+          ) : null}
 
-        {err ? <p className="text-sm text-red-600">{err}</p> : null}
+          {err ? <p className="text-sm text-red-600">{err}</p> : null}
+        </div>
+      ) : null}
+
+      <section className="mt-8 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+        <p className="text-sm font-medium text-stone-500">Players</p>
+        <div className="mt-4 space-y-6" aria-label="Players">
+          {playersBySeat
+            .filter((p) => p.id !== you)
+            .map((p) => {
+              const board = gs.boards[p.id];
+              const suffix = doneSuffix(board);
+              const isTurn = currentPid === p.id;
+              return (
+                <div key={p.id}>
+                  <p className="text-sm text-stone-700">
+                    {isTurn ? (
+                      <span className="font-bold text-stone-900">
+                        {p.name}&apos;s Turn{".".repeat(turnDotCount)}
+                        {suffix ? (
+                          <span className="font-normal text-stone-500">
+                            {" "}
+                            {suffix}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="font-medium">{p.name}</span>
+                        {suffix ? (
+                          <span className="font-normal text-stone-500">
+                            {" "}
+                            {suffix}
+                          </span>
+                        ) : null}
+                      </>
+                    )}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {board
+                      ? renderBoardLine(board, NO_DUP_FLASH)
+                      : null}
+                  </div>
+                </div>
+              );
+            })}
+        </div>
       </section>
 
       {showScores ? (
@@ -909,7 +989,7 @@ function ChooseActionPanel({
   onConfirm: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+    <>
       <p className="text-sm text-stone-700">
         Action: <span className="font-semibold">{cardLabel(phase.card)}</span>
       </p>
@@ -927,14 +1007,13 @@ function ChooseActionPanel({
               </option>
             ))}
           </select>
-          <button
-            type="button"
+          <PrimaryButton
             disabled={!targetId}
             onClick={onConfirm}
-            className="rounded-lg bg-amber-700 px-4 py-2 text-white disabled:opacity-40"
+            className="rounded-lg px-4 py-2 text-sm"
           >
-            Confirm target
-          </button>
+            Save
+          </PrimaryButton>
         </div>
       ) : (
         <p className="mt-2 text-sm text-stone-600">
@@ -942,19 +1021,21 @@ function ChooseActionPanel({
           {players.find((p) => p.id === seats[phase.chooserSeat])?.name}…
         </p>
       )}
-    </div>
+    </>
   );
 }
 
 function renderBoardLine(
   board: PlayerBoard,
-  duplicateNumIndices: Set<number> = new Set()
+  duplicateNumIndices: Set<number> = new Set(),
+  duplicateStatic = false,
 ) {
   const mods: Card[] = [];
   if (board.hasX2) mods.push({ k: "m", v: "x2" });
   mods.push(...board.flatMods);
   const actions: Card[] = [];
   if (board.secondChance) actions.push({ k: "a", v: "second" });
+  const dupHere = (i: number) => duplicateNumIndices.has(i);
 
   return (
     <>
@@ -966,7 +1047,8 @@ function renderBoardLine(
           key={`n-${i}`}
           card={c}
           small
-          duplicateFlash={duplicateNumIndices.has(i)}
+          duplicateFlash={!duplicateStatic && dupHere(i)}
+          duplicateHighlight={duplicateStatic && dupHere(i)}
         />
       ))}
       {actions.map((c, i) => (
@@ -1022,14 +1104,13 @@ export function JoinGate({
           onChange={(e) => setName(e.target.value)}
         />
       </label>
-      <button
-        type="button"
+      <PrimaryButton
         disabled={busy || !name.trim()}
         onClick={() => void submit()}
-        className="mt-6 w-full rounded-xl bg-stone-900 px-4 py-3 text-white disabled:opacity-40"
+        className="mt-6 w-full"
       >
         Join
-      </button>
+      </PrimaryButton>
       {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
     </div>
   );

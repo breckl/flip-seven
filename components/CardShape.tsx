@@ -40,48 +40,83 @@ export function CardShape({
   card,
   small,
   duplicateFlash,
+  duplicateHighlight,
+  secondChanceSaveFlash,
 }: {
   card: Card;
   small?: boolean;
   duplicateFlash?: boolean;
+  /** Same red styling as duplicate flash, without animation (e.g. bust dialog). */
+  duplicateHighlight?: boolean;
+  /** Green pulse when Second Chance negates a duplicate (pair with duplicate number card). */
+  secondChanceSaveFlash?: boolean;
 }) {
   const label = cardLabel(card);
   const isNum = card.k === "n";
+  const isSecondChance = card.k === "a" && card.v === "second";
   const surf = surfaceForCard(card);
+  const dupRed = duplicateFlash || duplicateHighlight;
+  const emphasisFlash = dupRed || secondChanceSaveFlash;
 
   const sizeClass = small
-    ? duplicateFlash
-      ? "h-[calc(3rem+5px)] w-[calc(2.25rem+5px)] text-sm"
-      : "h-12 w-9 text-sm"
-    : duplicateFlash
-      ? "h-[calc(4rem+5px)] w-[calc(2.75rem+5px)] text-lg"
-      : "h-16 w-11 text-lg";
+    ? emphasisFlash
+      ? "h-[calc(4.84rem+5px)] w-[calc(3.96rem+5px)] text-sm"
+      : "h-[4.84rem] w-[3.96rem] text-sm"
+    : emphasisFlash
+      ? "h-[calc(6.655rem+5px)] w-[calc(5.04rem+5px)] text-lg"
+      : "h-[6.655rem] w-[5.04rem] text-lg";
 
-  const textClass = duplicateFlash
+  const textClass = dupRed
     ? "font-bold text-red-600"
-    : isNum
-      ? "font-bold text-black"
-      : "text-xs font-bold leading-tight text-black";
+    : secondChanceSaveFlash
+      ? "font-bold text-green-700"
+      : isNum
+        ? "font-bold text-black"
+        : "text-xs font-bold leading-tight text-black";
 
-  const style: CSSProperties | undefined = duplicateFlash
+  const style: CSSProperties | undefined = dupRed
     ? {
         borderColor: "rgb(220 38 38)",
         backgroundColor: "rgb(255 255 255)",
       }
-    : {
-        borderColor: surf.border,
-        backgroundColor: surf.bg,
-      };
+    : secondChanceSaveFlash
+      ? {
+          borderColor: "rgb(22 163 74)",
+          backgroundColor: "rgb(255 255 255)",
+        }
+      : {
+          borderColor: surf.border,
+          backgroundColor: surf.bg,
+        };
+
+  const animClass = duplicateFlash
+    ? "animate-duplicate-card-pulse"
+    : secondChanceSaveFlash
+      ? "animate-second-chance-save-pulse"
+      : "";
 
   return (
     <div
-      key={duplicateFlash ? "dup-flash" : "normal"}
+      key={
+        duplicateFlash
+          ? "dup-flash"
+          : duplicateHighlight
+            ? "dup-hi"
+            : secondChanceSaveFlash
+              ? "sc-save"
+              : "normal"
+      }
       style={style}
-      className={`flex shrink-0 items-center justify-center rounded-lg border-2 shadow-sm ${sizeClass} ${textClass} ${
-        duplicateFlash ? "animate-duplicate-card-pulse" : ""
-      }`}
+      className={`flex shrink-0 items-center justify-center rounded-lg border-2 shadow-sm ${sizeClass} ${textClass} ${animClass}`}
     >
-      <span className="px-0.5 text-center">{label}</span>
+      {isSecondChance ? (
+        <span className="flex flex-col items-center justify-center gap-0 px-0.5 text-center leading-tight">
+          <span>2nd</span>
+          <span>Chance</span>
+        </span>
+      ) : (
+        <span className="px-0.5 text-center">{label}</span>
+      )}
     </div>
   );
 }

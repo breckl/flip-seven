@@ -1,6 +1,6 @@
 /**
- * Applies drizzle/0000_init.sql using DATABASE_URL from .env.local.
- * No psql required — works with Docker Postgres or Neon.
+ * Applies all drizzle/*.sql files in lexical order using DATABASE_URL from
+ * .env.local. No psql required — works with Docker Postgres or Neon.
  */
 const fs = require("fs");
 const path = require("path");
@@ -17,13 +17,24 @@ async function main() {
     );
     process.exit(1);
   }
-  const sqlPath = path.join(__dirname, "..", "drizzle", "0000_init.sql");
-  const sql = fs.readFileSync(sqlPath, "utf8");
+  const drizzleDir = path.join(__dirname, "..", "drizzle");
+  const files = fs
+    .readdirSync(drizzleDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  if (files.length === 0) {
+    console.error("No .sql files in drizzle/");
+    process.exit(1);
+  }
   const client = new Client({ connectionString: url });
   await client.connect();
-  await client.query(sql);
+  for (const f of files) {
+    const sqlPath = path.join(drizzleDir, f);
+    const sql = fs.readFileSync(sqlPath, "utf8");
+    await client.query(sql);
+    console.log("Applied:", sqlPath);
+  }
   await client.end();
-  console.log("Schema applied:", sqlPath);
 }
 
 main().catch((e) => {

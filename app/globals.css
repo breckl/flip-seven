@@ -30,3 +30,29 @@ body {
   animation: duplicate-card-pulse 1.6s ease-in-out;
   animation-fill-mode: none;
 }
+
+/* Second Chance negates a bust: pair pulse (green), hold, then fade */
+@keyframes second-chance-save-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  22% {
+    transform: scale(1.06);
+  }
+  45% {
+    transform: scale(1.06);
+  }
+  72% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.06);
+    opacity: 0;
+  }
+}
+
+.animate-second-chance-save-pulse {
+  animation: second-chance-save-pulse 3.4s ease-in-out forwards;
+}

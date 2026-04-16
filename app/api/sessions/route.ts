@@ -20,22 +20,15 @@ function dbErrorMessage(err: unknown): string {
 }
 
 export async function POST(req: Request) {
-  let body: { name?: string; expectedPlayerCount?: number };
+  let body: { name?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const name = String(body.name ?? "").trim();
-  const expected = Number(body.expectedPlayerCount);
   if (!name || name.length > 40) {
     return NextResponse.json({ error: "Invalid name" }, { status: 400 });
-  }
-  if (!Number.isInteger(expected) || expected < 3 || expected > 18) {
-    return NextResponse.json(
-      { error: "expectedPlayerCount must be 3–18" },
-      { status: 400 }
-    );
   }
 
   let db: ReturnType<typeof getDb>;
@@ -61,7 +54,6 @@ export async function POST(req: Request) {
           .values({
             code,
             status: "lobby",
-            expectedPlayerCount: expected,
           })
           .returning();
         const [host] = await tx

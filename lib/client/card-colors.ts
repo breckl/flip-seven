@@ -30,3 +30,4 @@ export function darkerOutline(hex: string, factor = 0.78): string {
     .map((x) => x.toString(16).padStart(2, "0"))
     .join("")}`;
 }
+

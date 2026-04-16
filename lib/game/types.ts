@@ -12,6 +12,8 @@ export type PlayerBoard = {
   flatMods: Card[];
   hasX2: boolean;
   secondChance: boolean;
+  /** The number card that would have busted; set when Second Chance negates a duplicate (not added to nums). Cleared on the next move. */
+  secondChanceRevealCard?: Card | null;
   status: "active" | "bust" | "stayed" | "frozen";
 };
 
@@ -33,11 +35,13 @@ export type GamePhase =
       deferred?: Card[];
     }
   | { t: "play"; currentTurnSeat: number }
-  /** Last action was a bust that ended the round; busting player must ack before scoring */
+  /** Busting player must ack: then scoring (round over) or play continues */
   | {
       t: "bust_reveal";
       roundIndex: number;
       bustedPlayerId: string;
+      /** If true (default), OK goes to round scoring. If false, OK advances play. */
+      scoringPending?: boolean;
     }
   /** Round just scored; wait for all players to acknowledge before next deal */
   | {
