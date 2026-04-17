@@ -16,9 +16,11 @@ export const NUMBER_CARD_FILLS: Record<number, string> = {
 };
 
 export const MODIFIER_CARD_FILL = "#CFF3F0";
-export const SECOND_CHANCE_FILL = "#F1D7FF";
+/** Matches reddish number-card palette (e.g. card 5) */
+export const SECOND_CHANCE_FILL = "#F6C6C6";
 export const FLIP_THREE_FILL = "#FFD9E6";
-export const FREEZE_FILL = "#E8F6FF";
+/** Light blue from number-card palette (card 0) */
+export const FREEZE_FILL = "#CFE8F7";
 
 /** Darken hex for card border/outline */
 export function darkerOutline(hex: string, factor = 0.78): string {

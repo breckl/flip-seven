@@ -75,12 +75,12 @@ export default function Home() {
 
       <dialog
         ref={instructionsRef}
-        className="w-[calc(100%-2rem)] max-w-lg rounded-2xl border border-stone-200 bg-white p-0 text-stone-800 shadow-2xl backdrop:bg-stone-900/40 backdrop:backdrop-blur-[2px] open:flex open:max-h-[min(85vh,36rem)] open:flex-col"
+        className="fixed inset-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full max-w-none flex-col rounded-none border-0 bg-white p-0 text-stone-800 shadow-none backdrop:bg-stone-900/40 backdrop:backdrop-blur-[2px] open:flex md:inset-auto md:left-1/2 md:top-1/2 md:h-auto md:max-h-[min(85vh,36rem)] md:w-[calc(100%-2rem)] md:max-w-lg md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-2xl md:border md:border-stone-200 md:shadow-2xl"
         aria-labelledby="instructions-title"
       >
-        <div className="flex shrink-0 items-center justify-between border-b border-stone-200 px-5 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-stone-200 px-5 pb-4 pt-[max(1rem,env(safe-area-inset-top))] md:pt-4">
           <h2 id="instructions-title" className="text-lg font-semibold text-stone-900">
-            How to play Flip 7
+            Instructions
           </h2>
           <button
             type="button"
@@ -179,7 +179,7 @@ export default function Home() {
             implementation — see the link below for the official product.
           </p>
         </div>
-        <div className="shrink-0 border-t border-stone-200 px-5 py-3">
+        <div className="hidden shrink-0 border-t border-stone-200 px-5 py-3 md:block">
           <PrimaryButton
             onClick={() => instructionsRef.current?.close()}
             className="w-full py-2.5 text-sm"
@@ -228,7 +228,7 @@ export default function Home() {
             <label className="block text-sm text-stone-700">
               Your name
               <input
-                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2"
+                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-base"
                 value={createName}
                 onChange={(e) => setCreateName(e.target.value)}
               />
@@ -246,7 +246,7 @@ export default function Home() {
             <label className="block text-sm text-stone-700">
               Game Code
               <input
-                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 font-mono uppercase tracking-widest"
+                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 font-mono text-base uppercase tracking-widest"
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value)}
                 maxLength={5}
@@ -255,7 +255,7 @@ export default function Home() {
             <label className="mt-4 block text-sm text-stone-700">
               Your name
               <input
-                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2"
+                className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-base"
                 value={joinName}
                 onChange={(e) => setJoinName(e.target.value)}
               />

@@ -10,6 +10,7 @@ import {
   cardLabel,
   duplicateNumberIndices,
   hasFlipSeven,
+  scoreBoard,
 } from "@/lib/game/rules";
 import type { Card, GamePhase, GameState, PlayerBoard } from "@/lib/game/types";
 
@@ -771,26 +772,57 @@ export function GameClient({ code }: { code: string }) {
 
   const isYourTurn = !!you && currentPid === you;
 
+  const roundPoints =
+    yourBoard !== undefined ? scoreBoard(yourBoard) : 0;
+  const gameTotal = you ? (totals[you] ?? 0) : 0;
+
+  const showFixedPlayBar = gs.phase.t === "play" && !!you;
+
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+    <>
+    <div
+      className={`mx-auto max-w-3xl px-4 pt-4 md:pt-8 ${
+        showFixedPlayBar
+          ? "pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
+          : "pb-6 md:pb-8"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
+        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
           {myName ? (
-            <p className="text-2xl font-semibold tracking-tight text-stone-900">
+            <p className="max-w-[min(100%,9rem)] shrink truncate text-xl font-semibold tracking-tight text-stone-900 sm:max-w-none md:text-2xl">
               {myName}
             </p>
           ) : null}
+          <div className="flex shrink-0 items-start gap-3 sm:gap-4">
+            <div className="text-center">
+              <p className="font-mono text-base font-semibold tabular-nums text-stone-900">
+                {roundPoints}
+              </p>
+              <p className="text-[0.65rem] leading-tight text-stone-500 sm:text-xs">
+                Round
+              </p>
+            </div>
+            <div className="text-center">
+              <p className="font-mono text-base font-semibold tabular-nums text-stone-900">
+                {gameTotal}
+              </p>
+              <p className="text-[0.65rem] leading-tight text-stone-500 sm:text-xs">
+                Game
+              </p>
+            </div>
+          </div>
         </div>
         <button
           type="button"
           onClick={() => setShowScores(true)}
-          className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
+          className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
         >
           Scores
         </button>
       </div>
 
-      <section className="mt-8 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="mt-5 md:mt-8">
         {isYourTurn ? (
           <p className="text-sm font-bold text-stone-900">
             Your Turn{".".repeat(turnDotCount)}
@@ -870,32 +902,10 @@ export function GameClient({ code }: { code: string }) {
             Join this device to see your hand.
           </p>
         )}
-      </section>
+      </div>
 
-      {(gs.phase.t === "play" && you) ||
-      (gs.phase.t === "choose_action" && you) ||
-      err ? (
-        <div className="mt-8 space-y-4">
-          {gs.phase.t === "play" && you ? (
-            <div className="flex flex-wrap gap-3">
-              <PrimaryButton
-                disabled={playDisabled}
-                onClick={() => void postMove({ type: "HIT" })}
-                className="flex-1"
-              >
-                Hit
-              </PrimaryButton>
-              <PrimaryButton
-                variant="secondary"
-                disabled={playDisabled}
-                onClick={() => void postMove({ type: "STAY" })}
-                className="flex-1"
-              >
-                Stay
-              </PrimaryButton>
-            </div>
-          ) : null}
-
+      {(gs.phase.t === "choose_action" && you) || err ? (
+        <div className="mt-6 space-y-4">
           {gs.phase.t === "choose_action" && you ? (
             <section
               className="space-y-3 rounded-2xl border-2 border-[rgb(89_197_143)] bg-[#DFF5EA] p-4 shadow-sm"
@@ -1049,6 +1059,29 @@ export function GameClient({ code }: { code: string }) {
         </div>
       ) : null}
     </div>
+
+      {showFixedPlayBar ? (
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-stone-200 bg-white px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+          <div className="mx-auto flex max-w-3xl gap-2">
+            <PrimaryButton
+              disabled={playDisabled}
+              onClick={() => void postMove({ type: "HIT" })}
+              className="w-[70%] min-h-[3.6rem] py-[0.9rem]"
+            >
+              Hit
+            </PrimaryButton>
+            <PrimaryButton
+              variant="secondary"
+              disabled={playDisabled}
+              onClick={() => void postMove({ type: "STAY" })}
+              className="w-[30%] min-h-[3.6rem] py-[0.9rem]"
+            >
+              Stay
+            </PrimaryButton>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -1086,7 +1119,7 @@ function ChooseActionPanel({
       {phase.chooserSeat === seats.indexOf(you) ? (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <select
-            className="rounded-lg border border-stone-300 bg-white px-3 py-2"
+            className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-base"
             value={targetId}
             onChange={(e) => setTargetId(e.target.value)}
           >
@@ -1219,7 +1252,7 @@ export function JoinGate({
       <label className="mt-6 block text-sm font-medium text-stone-700">
         Your name
         <input
-          className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2"
+          className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-base"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
