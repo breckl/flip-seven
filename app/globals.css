@@ -12,17 +12,23 @@ body {
   color: var(--foreground);
 }
 
-/* Brief stretch + emphasis when a duplicate number is dealt */
+/*
+ * Tailwind utilities like `flex` override UA `dialog:not([open]) { display: none }`,
+ * so a <dialog> can appear "open" visually without the `open` attribute — breaking
+ * showModal() and form method="dialog". Keep closed dialogs hidden regardless.
+ */
+dialog.instructions-dialog:not([open]) {
+  display: none !important;
+}
+
+/* Duplicate reveal: no scale change — keeps layout stable when two match */
 @keyframes duplicate-card-pulse {
   0%,
   100% {
-    transform: scale(1);
+    opacity: 1;
   }
-  35% {
-    transform: scale(1.06);
-  }
-  65% {
-    transform: scale(1.06);
+  50% {
+    opacity: 0.88;
   }
 }
 

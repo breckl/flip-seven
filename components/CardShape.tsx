@@ -7,44 +7,35 @@ import {
   MODIFIER_CARD_FILL,
   NUMBER_CARD_FILLS,
   SECOND_CHANCE_FILL,
-  darkerOutline,
 } from "@/lib/client/card-colors";
 
-function surfaceForCard(card: Card): { bg: string; border: string } {
+function surfaceForCard(card: Card): { bg: string } {
   if (card.k === "n") {
-    const fill = NUMBER_CARD_FILLS[card.v] ?? "#ffffff";
-    return { bg: fill, border: darkerOutline(fill) };
+    return { bg: NUMBER_CARD_FILLS[card.v] ?? "#ffffff" };
   }
   if (card.k === "m") {
-    const fill = MODIFIER_CARD_FILL;
-    return { bg: fill, border: darkerOutline(fill) };
+    return { bg: MODIFIER_CARD_FILL };
   }
   if (card.k === "a") {
-    if (card.v === "second") {
-      const fill = SECOND_CHANCE_FILL;
-      return { bg: fill, border: darkerOutline(fill) };
-    }
-    if (card.v === "flip3") {
-      const fill = FLIP_THREE_FILL;
-      return { bg: fill, border: darkerOutline(fill) };
-    }
-    if (card.v === "freeze") {
-      const fill = FREEZE_FILL;
-      return { bg: fill, border: darkerOutline(fill) };
-    }
+    if (card.v === "second") return { bg: SECOND_CHANCE_FILL };
+    if (card.v === "flip3") return { bg: FLIP_THREE_FILL };
+    if (card.v === "freeze") return { bg: FREEZE_FILL };
   }
-  return { bg: "#ffffff", border: "#1c1917" };
+  return { bg: "#ffffff" };
 }
 
 export function CardShape({
   card,
   small,
+  fitNumberRow,
   duplicateFlash,
   duplicateHighlight,
   secondChanceSaveFlash,
 }: {
   card: Card;
   small?: boolean;
+  /** Fill one of 7 equal columns in the number row (width from grid, height from aspect). */
+  fitNumberRow?: boolean;
   duplicateFlash?: boolean;
   /** Same red styling as duplicate flash, without animation (e.g. bust dialog). */
   duplicateHighlight?: boolean;
@@ -54,17 +45,23 @@ export function CardShape({
   const label = cardLabel(card);
   const isNum = card.k === "n";
   const isSecondChance = card.k === "a" && card.v === "second";
+  const isFlipThree = card.k === "a" && card.v === "flip3";
   const surf = surfaceForCard(card);
   const dupRed = duplicateFlash || duplicateHighlight;
-  const emphasisFlash = dupRed || secondChanceSaveFlash;
+  /** Extra slack only for Second Chance save animation (still uses scale in CSS) */
+  const extraEmphasis = secondChanceSaveFlash;
 
-  const sizeClass = small
-    ? emphasisFlash
-      ? "h-[calc(4.84rem+5px)] w-[calc(3.96rem+5px)] text-sm"
-      : "h-[4.84rem] w-[3.96rem] text-sm"
-    : emphasisFlash
-      ? "h-[calc(6.655rem+5px)] w-[calc(5.04rem+5px)] text-lg"
-      : "h-[6.655rem] w-[5.04rem] text-lg";
+  /* Small / large: 15% narrower, 5% shorter vs 3.96×4.84 / 5.04×6.655. Number row: 7 columns → w-full + same aspect */
+  const sizeClass =
+    small && fitNumberRow && !extraEmphasis
+      ? "h-auto w-full min-w-0 max-w-full aspect-[3.366/4.598] text-xs sm:text-sm"
+      : small
+        ? extraEmphasis
+          ? "h-[calc(4.598rem+5px)] w-[calc(3.366rem+5px)] text-sm"
+          : "h-[4.598rem] w-[3.366rem] text-sm"
+        : extraEmphasis
+          ? "h-[calc(6.32225rem+5px)] w-[calc(4.284rem+5px)] text-lg"
+          : "h-[6.32225rem] w-[4.284rem] text-lg";
 
   const textClass = dupRed
     ? "font-bold text-red-600"
@@ -75,19 +72,10 @@ export function CardShape({
         : "text-xs font-bold leading-tight text-black";
 
   const style: CSSProperties | undefined = dupRed
-    ? {
-        borderColor: "rgb(220 38 38)",
-        backgroundColor: "rgb(255 255 255)",
-      }
+    ? { backgroundColor: "rgb(255 255 255)" }
     : secondChanceSaveFlash
-      ? {
-          borderColor: "rgb(22 163 74)",
-          backgroundColor: "rgb(255 255 255)",
-        }
-      : {
-          borderColor: surf.border,
-          backgroundColor: surf.bg,
-        };
+      ? { backgroundColor: "rgb(255 255 255)" }
+      : { backgroundColor: surf.bg };
 
   const animClass = duplicateFlash
     ? "animate-duplicate-card-pulse"
@@ -107,7 +95,7 @@ export function CardShape({
               : "normal"
       }
       style={style}
-      className={`flex shrink-0 items-center justify-center rounded-lg border-2 shadow-sm ${sizeClass} ${textClass} ${animClass}`}
+      className={`flex items-center justify-center rounded-lg shadow-sm ${dupRed ? "border-2 border-red-600" : ""} ${small && fitNumberRow ? "min-w-0" : "shrink-0"} ${sizeClass} ${textClass} ${animClass}`}
     >
       {isSecondChance ? (
         <span
@@ -123,6 +111,14 @@ export function CardShape({
           >
             <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
           </svg>
+        </span>
+      ) : isFlipThree ? (
+        <span
+          className="flex flex-col items-center justify-center px-0.5 text-center leading-tight"
+          aria-label={label}
+        >
+          <span className="block">Flip</span>
+          <span className="block">3</span>
         </span>
       ) : (
         <span className="px-0.5 text-center">{label}</span>

@@ -28,13 +28,13 @@ function variantClasses(variant: PrimaryButtonVariant, disabled: boolean): strin
 
 export const PrimaryButton = forwardRef<HTMLButtonElement, PrimaryButtonProps>(
   function PrimaryButton(
-    { className = "", disabled, variant = "primary", ...props },
+    { className = "", disabled, variant = "primary", type = "button", ...props },
     ref,
   ) {
     return (
       <button
         ref={ref}
-        type="button"
+        type={type}
         disabled={disabled}
         className={`rounded-xl px-4 py-3 transition-[filter,background-color,color,border-color] disabled:cursor-not-allowed ${variantClasses(variant, !!disabled)} ${className}`}
         {...props}

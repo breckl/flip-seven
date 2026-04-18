@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CardShape } from "@/components/CardShape";
+import { PlayerHandMessageStack } from "@/components/PlayerHandMessageStack";
 import { useDuplicateFlash } from "@/components/useDuplicateFlash";
+import { usePlayerHandMessages } from "@/hooks/usePlayerHandMessages";
 import { loadPlayerId, savePlayerBinding } from "@/lib/client/player-storage";
 import { PrimaryButton } from "@/components/ui/PrimaryButton";
 import {
@@ -58,14 +60,6 @@ export function GameClient({ code }: { code: string }) {
   const [showPlayersCards, setShowPlayersCards] = useState(true);
   /** Cycles 0–3 dots for “Name’s Turn…” while someone is up */
   const [turnDotCount, setTurnDotCount] = useState(0);
-  const [secondChanceFlash, setSecondChanceFlash] = useState(false);
-  const prevSecondChance = useRef<boolean | null>(null);
-  const [flipSevenFlash, setFlipSevenFlash] = useState(false);
-  const prevFlipSeven = useRef<boolean | null>(null);
-  const [secondChanceSaveFlash, setSecondChanceSaveFlash] = useState<{
-    numberCard: Card;
-  } | null>(null);
-  const prevSecondChanceRevealSerial = useRef<string | null>(null);
   const [lobbyShareUrl, setLobbyShareUrl] = useState("");
 
   const c = code.toUpperCase();
@@ -156,87 +150,6 @@ export function GameClient({ code }: { code: string }) {
     setLobbyShareUrl(`${window.location.origin}/game/${c}`);
   }, [c]);
 
-  const yourBoardForFlash =
-    playingPayload && playerId
-      ? playingPayload.game.state.boards[playerId]
-      : undefined;
-  const phaseForFlash = playingPayload?.game.state.phase;
-
-  useEffect(() => {
-    if (
-      phaseForFlash?.t === "round_summary" ||
-      phaseForFlash?.t === "game_summary" ||
-      phaseForFlash?.t === "game_over"
-    ) {
-      prevSecondChanceRevealSerial.current = null;
-      setSecondChanceSaveFlash(null);
-      return;
-    }
-    const c = yourBoardForFlash?.secondChanceRevealCard;
-    const ser = c ? JSON.stringify(c) : null;
-    if (!ser) {
-      prevSecondChanceRevealSerial.current = null;
-      setSecondChanceSaveFlash(null);
-      return;
-    }
-    if (ser === prevSecondChanceRevealSerial.current) return;
-    if (c?.k !== "n") return;
-    prevSecondChanceRevealSerial.current = ser;
-    setSecondChanceSaveFlash({ numberCard: c });
-    const t = window.setTimeout(() => setSecondChanceSaveFlash(null), 3600);
-    return () => window.clearTimeout(t);
-  }, [yourBoardForFlash?.secondChanceRevealCard, phaseForFlash?.t]);
-
-  useEffect(() => {
-    if (!yourBoardForFlash || !phaseForFlash) return;
-    if (
-      phaseForFlash.t === "round_summary" ||
-      phaseForFlash.t === "game_summary" ||
-      phaseForFlash.t === "game_over" ||
-      phaseForFlash.t === "bust_reveal"
-    ) {
-      prevSecondChance.current = yourBoardForFlash.secondChance;
-      setSecondChanceFlash(false);
-      return;
-    }
-    const now = yourBoardForFlash.secondChance;
-    if (
-      prevSecondChance.current !== null &&
-      prevSecondChance.current === false &&
-      now === true
-    ) {
-      setSecondChanceFlash(true);
-    }
-    if (now === false) {
-      setSecondChanceFlash(false);
-    }
-    prevSecondChance.current = now;
-  }, [yourBoardForFlash?.secondChance, phaseForFlash?.t]);
-
-  useEffect(() => {
-    if (!yourBoardForFlash || !phaseForFlash) return;
-    if (
-      phaseForFlash.t === "round_summary" ||
-      phaseForFlash.t === "game_summary" ||
-      phaseForFlash.t === "game_over" ||
-      phaseForFlash.t === "bust_reveal"
-    ) {
-      prevFlipSeven.current =
-        hasFlipSeven(yourBoardForFlash.nums) &&
-        yourBoardForFlash.status !== "bust";
-      return;
-    }
-    const now =
-      hasFlipSeven(yourBoardForFlash.nums) &&
-      yourBoardForFlash.status !== "bust";
-    if (prevFlipSeven.current !== null && !prevFlipSeven.current && now) {
-      setFlipSevenFlash(true);
-      const id = window.setTimeout(() => setFlipSevenFlash(false), 6000);
-      return () => window.clearTimeout(id);
-    }
-    prevFlipSeven.current = now;
-  }, [yourBoardForFlash?.nums, yourBoardForFlash?.status, phaseForFlash?.t]);
-
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/sessions/${c}/game`, { cache: "no-store" });
     if (!res.ok) {
@@ -304,6 +217,12 @@ export function GameClient({ code }: { code: string }) {
       await refresh();
     },
     [c, playerId, refresh],
+  );
+
+  const { messages: handMessages } = usePlayerHandMessages(
+    playingPayload,
+    playerId,
+    postMove,
   );
 
   /** Sole remaining active player: auto-submit action target (server applies to self) */
@@ -433,101 +352,6 @@ export function GameClient({ code }: { code: string }) {
   const gs = playingPayload.game.state;
   const players = playingPayload.players;
   const you = playerId;
-
-  const pendingTarget = gs.pendingTargetAck;
-  if (pendingTarget && you === pendingTarget.targetPlayerId) {
-    const selfTarget =
-      pendingTarget.actorPlayerId === pendingTarget.targetPlayerId;
-    const actorName =
-      players.find((p) => p.id === pendingTarget.actorPlayerId)?.name ??
-      "A player";
-    const cardName = cardLabel(pendingTarget.card);
-    return (
-      <div className="mx-auto max-w-lg px-4 py-8">
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h2 className="text-xl font-semibold text-stone-900">
-              {selfTarget ? "Card applied" : "You were targeted"}
-            </h2>
-            <p className="mt-3 text-stone-700">
-              {selfTarget ? (
-                <>
-                  You&apos;re the only player still in this round.{" "}
-                  <span className="font-semibold">{cardName}</span> was applied
-                  to you.
-                </>
-              ) : (
-                <>
-                  <span className="font-semibold">{actorName}</span> played{" "}
-                  <span className="font-semibold">{cardName}</span> on you.
-                </>
-              )}
-            </p>
-            <PrimaryButton
-              disabled={!you}
-              onClick={() => void postMove({ type: "ACK_TARGET_NOTIFY" })}
-              className="mt-8 w-full"
-            >
-              Ok
-            </PrimaryButton>
-            {err ? <p className="mt-4 text-sm text-red-600">{err}</p> : null}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (gs.phase.t === "bust_reveal") {
-    const ph = gs.phase;
-    const bustedBoard = gs.boards[ph.bustedPlayerId];
-    const bustedName =
-      players.find((p) => p.id === ph.bustedPlayerId)?.name ?? "Player";
-    const isBustedYou = you === ph.bustedPlayerId;
-
-    return (
-      <div className="mx-auto max-w-lg px-4 py-8">
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl bg-white p-6 shadow-xl">
-            {isBustedYou && bustedBoard ? (
-              <>
-                <h2 className="text-xl font-semibold text-stone-900">
-                  You drew a duplicate. You&apos;re out!
-                </h2>
-                <div className="mt-6 flex flex-wrap gap-2">
-                  {renderBoardLine(
-                    bustedBoard,
-                    duplicateNumberIndices(bustedBoard.nums),
-                    true,
-                  )}
-                </div>
-                <PrimaryButton
-                  disabled={!you}
-                  onClick={() => void postMove({ type: "ACK_BUST_REVEAL" })}
-                  className="mt-8 w-full"
-                >
-                  Ok
-                </PrimaryButton>
-                {err ? (
-                  <p className="mt-4 text-sm text-red-600">{err}</p>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <p className="text-center text-stone-700">
-                  Waiting for{" "}
-                  <span className="font-semibold">{bustedName}</span> to
-                  confirm…
-                </p>
-                {err ? (
-                  <p className="mt-4 text-center text-sm text-red-600">{err}</p>
-                ) : null}
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   if (gs.phase.t === "round_summary") {
     const ph = gs.phase;
@@ -778,6 +602,13 @@ export function GameClient({ code }: { code: string }) {
 
   const showFixedPlayBar = gs.phase.t === "play" && !!you;
 
+  const bustReveal = gs.phase.t === "bust_reveal" ? gs.phase : null;
+  const bustWaitingName =
+    bustReveal && you && you !== bustReveal.bustedPlayerId
+      ? (players.find((p) => p.id === bustReveal.bustedPlayerId)?.name ??
+        "Player")
+      : null;
+
   return (
     <>
     <div
@@ -787,6 +618,13 @@ export function GameClient({ code }: { code: string }) {
           : "pb-6 md:pb-8"
       }`}
     >
+      {bustWaitingName ? (
+        <p className="mb-3 text-center text-sm text-stone-600" role="status">
+          Waiting for{" "}
+          <span className="font-semibold text-stone-800">{bustWaitingName}</span>{" "}
+          to confirm…
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
         <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
           {myName ? (
@@ -830,72 +668,33 @@ export function GameClient({ code }: { code: string }) {
         ) : (
           <p className="text-sm font-medium text-stone-500">Your hand</p>
         )}
-        {secondChanceFlash ? (
-          <div
-            className="mt-2 flex items-start justify-between gap-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-left"
-            role="status"
-          >
-            <p className="text-sm font-medium text-green-800">
-              Second chance card!
-            </p>
-            <button
-              type="button"
-              onClick={() => setSecondChanceFlash(false)}
-              className="shrink-0 rounded p-0.5 text-lg leading-none text-green-800 hover:bg-green-100/80"
-              aria-label="Dismiss"
-            >
-              ×
-            </button>
-          </div>
-        ) : null}
-        {flipSevenFlash ? (
-          <p
-            className="mt-2 text-sm font-medium text-emerald-800"
-            role="status"
-          >
-            Flip 7! You have 7 different numbers — +15 bonus points, and the
-            round ends when play catches up.
-          </p>
-        ) : null}
         {yourBoard ? (
           <>
             <div className="mt-4 space-y-2">
-              <div className="flex flex-wrap gap-2">
-                {renderBoardNumberRow(yourBoard, yourDupFlash, false)}
+              <div className="grid w-full grid-cols-7 gap-1.5">
+                {renderBoardNumberRow(
+                  yourBoard,
+                  yourBoard.status === "bust"
+                    ? duplicateNumberIndices(yourBoard.nums)
+                    : yourDupFlash,
+                  yourBoard.status === "bust",
+                  true,
+                )}
               </div>
-              {secondChanceSaveFlash ||
-              pendingChooserActionCard ||
-              boardHasModsRow(yourBoard) ? (
-                <div className="flex flex-wrap gap-2">
-                  {secondChanceSaveFlash ? (
-                    <>
-                      <CardShape
-                        card={secondChanceSaveFlash.numberCard}
-                        small
-                        secondChanceSaveFlash
-                      />
-                      <CardShape
-                        card={{ k: "a", v: "second" }}
-                        small
-                        secondChanceSaveFlash
-                      />
-                    </>
-                  ) : null}
+              {pendingChooserActionCard || boardHasModsRow(yourBoard) ? (
+                <div className="grid w-full grid-cols-7 gap-1.5">
                   {pendingChooserActionCard ? (
-                    <CardShape card={pendingChooserActionCard} small />
+                    <CardShape
+                      card={pendingChooserActionCard}
+                      small
+                      fitNumberRow
+                    />
                   ) : null}
-                  {renderBoardModsRow(yourBoard)}
+                  {renderBoardModsRow(yourBoard, true)}
                 </div>
               ) : null}
             </div>
-            {yourBoard.status === "bust" ? (
-              <p
-                className="mt-3 text-sm font-medium text-red-700"
-                role="status"
-              >
-                You&apos;re out!
-              </p>
-            ) : null}
+            <PlayerHandMessageStack messages={handMessages} />
           </>
         ) : (
           <p className="mt-2 text-sm text-stone-500">
@@ -908,7 +707,7 @@ export function GameClient({ code }: { code: string }) {
         <div className="mt-6 space-y-4">
           {gs.phase.t === "choose_action" && you ? (
             <section
-              className="space-y-3 rounded-2xl border-2 border-[rgb(89_197_143)] bg-[#DFF5EA] p-4 shadow-sm"
+              className="space-y-3 rounded-2xl bg-[#DFF5EA] p-4 shadow-sm"
               aria-label="Card action"
             >
               <ChooseActionPanel
@@ -951,7 +750,7 @@ export function GameClient({ code }: { code: string }) {
               const board = gs.boards[p.id];
               const suffix = doneSuffix(board);
               const isTurn = currentPid === p.id;
-              const otherModsRow = board ? renderBoardModsRow(board) : null;
+              const otherModsRow = board ? renderBoardModsRow(board, true) : null;
               return (
                 <div key={p.id}>
                   <p className="text-sm text-stone-700">
@@ -979,11 +778,11 @@ export function GameClient({ code }: { code: string }) {
                   </p>
                   {showPlayersCards && board ? (
                     <div className="mt-2 space-y-2">
-                      <div className="flex flex-wrap gap-2">
-                        {renderBoardNumberRow(board, NO_DUP_FLASH, false)}
+                      <div className="grid w-full grid-cols-7 gap-1.5">
+                        {renderBoardNumberRow(board, NO_DUP_FLASH, false, true)}
                       </div>
                       {otherModsRow ? (
-                        <div className="flex flex-wrap gap-2">
+                        <div className="grid w-full grid-cols-7 gap-1.5">
                           {otherModsRow}
                         </div>
                       ) : null}
@@ -1092,6 +891,20 @@ function doneSuffix(board: PlayerBoard | undefined): string | null {
   return null;
 }
 
+function chooseActionLeadLine(
+  phase: Extract<GamePhase, { t: "choose_action" }>,
+): string {
+  const label = cardLabel(phase.card);
+  switch (phase.context) {
+    case "deal":
+      return `You were dealt ${label}. Choose a player.`;
+    case "hit":
+      return `You drew ${label}. Choose a player.`;
+    case "flip3":
+      return `During your Flip 3, you drew ${label}. Choose a player.`;
+  }
+}
+
 function ChooseActionPanel({
   phase,
   you,
@@ -1111,12 +924,19 @@ function ChooseActionPanel({
   setTargetId: (id: string) => void;
   onConfirm: () => void;
 }) {
+  const chooserIsYou = phase.chooserSeat === seats.indexOf(you);
   return (
     <>
-      <p className="text-sm text-stone-700">
-        Action: <span className="font-semibold">{cardLabel(phase.card)}</span>
-      </p>
-      {phase.chooserSeat === seats.indexOf(you) ? (
+      {chooserIsYou ? (
+        <p className="text-sm font-medium text-stone-800">
+          {chooseActionLeadLine(phase)}
+        </p>
+      ) : (
+        <p className="text-sm text-stone-700">
+          Action: <span className="font-semibold">{cardLabel(phase.card)}</span>
+        </p>
+      )}
+      {chooserIsYou ? (
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <select
             className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-base"
@@ -1148,14 +968,21 @@ function ChooseActionPanel({
   );
 }
 
+
 function boardHasModsRow(board: PlayerBoard): boolean {
-  return board.hasX2 || board.flatMods.length > 0 || board.secondChance;
+  return (
+    board.hasX2 ||
+    board.flatMods.length > 0 ||
+    board.secondChance ||
+    board.status === "frozen"
+  );
 }
 
 function renderBoardNumberRow(
   board: PlayerBoard,
   duplicateNumIndices: Set<number>,
   duplicateStatic: boolean,
+  fitSevenAcross?: boolean,
 ) {
   const dupHere = (i: number) => duplicateNumIndices.has(i);
   return (
@@ -1165,6 +992,7 @@ function renderBoardNumberRow(
           key={`n-${i}`}
           card={c}
           small
+          fitNumberRow={fitSevenAcross}
           duplicateFlash={!duplicateStatic && dupHere(i)}
           duplicateHighlight={duplicateStatic && dupHere(i)}
         />
@@ -1173,21 +1001,32 @@ function renderBoardNumberRow(
   );
 }
 
-/** Modifiers (×2, +flat) and 2nd Chance token — second row; null if nothing to show */
-function renderBoardModsRow(board: PlayerBoard) {
+/** Modifiers (×2, +flat), Freeze when frozen, 2nd Chance — second row; null if nothing to show */
+function renderBoardModsRow(board: PlayerBoard, fitSevenAcross?: boolean) {
   const mods: Card[] = [];
   if (board.hasX2) mods.push({ k: "m", v: "x2" });
   mods.push(...board.flatMods);
   const actions: Card[] = [];
   if (board.secondChance) actions.push({ k: "a", v: "second" });
+  if (board.status === "frozen") actions.push({ k: "a", v: "freeze" });
   if (mods.length === 0 && actions.length === 0) return null;
   return (
     <>
       {mods.map((c, i) => (
-        <CardShape key={`m-${i}`} card={c} small />
+        <CardShape
+          key={`m-${i}`}
+          card={c}
+          small
+          fitNumberRow={fitSevenAcross}
+        />
       ))}
       {actions.map((c, i) => (
-        <CardShape key={`a-${i}`} card={c} small />
+        <CardShape
+          key={`a-${i}`}
+          card={c}
+          small
+          fitNumberRow={fitSevenAcross}
+        />
       ))}
     </>
   );
@@ -1198,14 +1037,14 @@ function renderBoardLine(
   duplicateNumIndices: Set<number> = new Set(),
   duplicateStatic = false,
 ) {
-  const modsRow = renderBoardModsRow(board);
+  const modsRow = renderBoardModsRow(board, true);
   return (
     <>
-      <div className="flex flex-wrap gap-2">
-        {renderBoardNumberRow(board, duplicateNumIndices, duplicateStatic)}
+      <div className="grid w-full grid-cols-7 gap-1.5">
+        {renderBoardNumberRow(board, duplicateNumIndices, duplicateStatic, true)}
       </div>
       {modsRow ? (
-        <div className="mt-2 flex flex-wrap gap-2">{modsRow}</div>
+        <div className="mt-2 grid w-full grid-cols-7 gap-1.5">{modsRow}</div>
       ) : null}
     </>
   );
