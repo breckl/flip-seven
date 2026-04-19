@@ -1,7 +1,8 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { games, players, sessions } from "@/db/schema";
 import type { GameState } from "@/lib/game/types";
+import type { RematchPayload } from "@/lib/rematch-payload";
 
 /** Same JSON shape as GET `/api/sessions/[code]/game` when not in lobby */
 export type PlayingSessionBody = {
@@ -10,12 +11,19 @@ export type PlayingSessionBody = {
   hostPlayerId: string | null;
   players: { id: string; name: string; seatOrder: number }[];
   game: { version: number; updatedAt: string; state: GameState };
+  rematch?: RematchPayload;
 };
 
 export async function findSessionByCode(code: string) {
   const db = getDb();
   const c = code.trim().toUpperCase();
   const rows = await db.select().from(sessions).where(eq(sessions.code, c)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function findSessionById(id: string) {
+  const db = getDb();
+  const rows = await db.select().from(sessions).where(eq(sessions.id, id)).limit(1);
   return rows[0] ?? null;
 }
 
@@ -40,18 +48,53 @@ export async function getGameRow(sessionId: string) {
   return rows[0] ?? null;
 }
 
+async function rematchPayloadForFinishedSession(
+  session: NonNullable<Awaited<ReturnType<typeof findSessionByCode>>>,
+  oldPlayerIds: string[]
+): Promise<RematchPayload | undefined> {
+  if (session.status !== "finished" || !session.rematchTargetSessionId) {
+    return undefined;
+  }
+  const target = await findSessionById(session.rematchTargetSessionId);
+  if (!target) return undefined;
+  const db = getDb();
+  const joinedRows = await db
+    .select({ rematchFromPlayerId: players.rematchFromPlayerId })
+    .from(players)
+    .where(
+      and(
+        eq(players.sessionId, target.id),
+        isNotNull(players.rematchFromPlayerId),
+        inArray(players.rematchFromPlayerId, oldPlayerIds)
+      )
+    );
+  const joinedOldPlayerIds = joinedRows
+    .map((r) => r.rematchFromPlayerId)
+    .filter((id): id is string => id != null);
+  return {
+    targetCode: target.code,
+    targetStatus: target.status,
+    joinedOldPlayerIds,
+  };
+}
+
 export async function getPlayingSessionBody(
   session: NonNullable<Awaited<ReturnType<typeof findSessionByCode>>>
 ): Promise<PlayingSessionBody | null> {
   if (session.status === "lobby") return null;
   const game = await getGameRow(session.id);
   if (!game) return null;
-  const players = await listPlayers(session.id);
+  const playerRows = await listPlayers(session.id);
+  const playerIds = playerRows.map((p) => p.id);
+  const rematch =
+    session.status === "finished"
+      ? await rematchPayloadForFinishedSession(session, playerIds)
+      : undefined;
   return {
     status: session.status,
     code: session.code,
     hostPlayerId: session.hostPlayerId,
-    players: players.map((p) => ({
+    players: playerRows.map((p) => ({
       id: p.id,
       name: p.name,
       seatOrder: p.seatOrder,
@@ -64,6 +107,7 @@ export async function getPlayingSessionBody(
           : game.updatedAt.toISOString(),
       state: game.state as GameState,
     },
+    ...(rematch ? { rematch } : {}),
   };
 }
 

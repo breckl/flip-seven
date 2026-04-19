@@ -9,6 +9,7 @@ import {
   darkerOutline,
 } from "@/lib/client/card-colors";
 import { cardLabel, hasFlipSeven } from "@/lib/game/rules";
+import type { RematchPayload } from "@/lib/rematch-payload";
 import type { Card, GameState } from "@/lib/game/types";
 
 export const HAND_MESSAGE_MAX = 3;
@@ -29,6 +30,7 @@ type PlayingPayload = {
   status: "playing" | "finished";
   game: { version: number; state: GameState; updatedAt: string };
   players: PlayerRow[];
+  rematch?: RematchPayload;
 };
 
 function useHandMessageQueue() {

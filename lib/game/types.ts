@@ -67,6 +67,28 @@ export type PendingTargetAck = {
   card: Card;
 };
 
+export type GroupFeedKind =
+  | "drew_card"
+  | "action_waiting"
+  | "gave_action"
+  | "stayed"
+  | "duplicate_out"
+  | "duplicate_saved"
+  | "flip7_bonus";
+
+/** Server-append-only activity log for the group feed UI (JSON-serializable). */
+export type GroupFeedEntry = {
+  id: string;
+  roundIndex: number;
+  /** Primary player the line is about (client hides when this is the local player). */
+  actorId: string;
+  targetId?: string;
+  kind: GroupFeedKind;
+  card?: Card;
+  /** Duplicate number for bust / Second Chance save lines */
+  numberValue?: number;
+};
+
 export type GameState = {
   phase: GamePhase;
   dealerSeat: number;
@@ -80,4 +102,8 @@ export type GameState = {
   roundScoresHistory?: { roundIndex: number; scores: Record<string, number> }[];
   /** Set when Freeze / Flip 3 / Second Chance is played on a target; cleared on ack or round end */
   pendingTargetAck?: PendingTargetAck | null;
+  /** Activity feed entries; omitted in older saved games */
+  groupFeed?: GroupFeedEntry[];
+  /** Monotonic counter for feed entry ids */
+  groupFeedSeq?: number;
 };

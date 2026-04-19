@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CardShape } from "@/components/CardShape";
+import { GroupFeed } from "@/components/GroupFeed";
 import { PlayerHandMessageStack } from "@/components/PlayerHandMessageStack";
 import { useDuplicateFlash } from "@/components/useDuplicateFlash";
 import { usePlayerHandMessages } from "@/hooks/usePlayerHandMessages";
@@ -14,6 +16,7 @@ import {
   hasFlipSeven,
   scoreBoard,
 } from "@/lib/game/rules";
+import type { RematchPayload } from "@/lib/rematch-payload";
 import type { Card, GamePhase, GameState, PlayerBoard } from "@/lib/game/types";
 
 type PlayerRow = { id: string; name: string; seatOrder: number };
@@ -31,6 +34,7 @@ type PlayingPayload = {
   hostPlayerId: string | null;
   players: PlayerRow[];
   game: { version: number; state: GameState; updatedAt: string };
+  rematch?: RematchPayload;
 };
 
 type Payload = LobbyPayload | PlayingPayload;
@@ -51,13 +55,17 @@ function isPlayingPayload(x: unknown): x is PlayingPayload {
 const NO_DUP_FLASH = new Set<number>();
 
 export function GameClient({ code }: { code: string }) {
+  const router = useRouter();
   const [data, setData] = useState<Payload | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [rematchBusy, setRematchBusy] = useState(false);
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState<string>("");
   const [showScores, setShowScores] = useState(false);
-  /** Players list: compact names-only vs full card rows */
-  const [showPlayersCards, setShowPlayersCards] = useState(true);
+  /** Players section: activity feed vs other players' cards */
+  const [playersSectionTab, setPlayersSectionTab] = useState<
+    "activity" | "cards"
+  >("activity");
   /** Cycles 0–3 dots for “Name’s Turn…” while someone is up */
   const [turnDotCount, setTurnDotCount] = useState(0);
   const [lobbyShareUrl, setLobbyShareUrl] = useState("");
@@ -84,6 +92,12 @@ export function GameClient({ code }: { code: string }) {
       (a, b) => a.seatOrder - b.seatOrder,
     );
   }, [playingPayload]);
+
+  const visibleGroupFeed = useMemo(() => {
+    if (!playingPayload || !playerId) return [];
+    const feed = playingPayload.game.state.groupFeed ?? [];
+    return feed.filter((e) => e.actorId !== playerId);
+  }, [playingPayload, playerId]);
 
   const turnPlayerId = useMemo(() => {
     if (!playingPayload) return null;
@@ -497,6 +511,53 @@ export function GameClient({ code }: { code: string }) {
       ws != null && ws >= 0 && ws < gs.seats.length ? gs.seats[ws] : null;
     const sorted = [...players].sort((a, b) => a.seatOrder - b.seatOrder);
     const roundHistory = gs.roundScoresHistory ?? [];
+    const hostId = playingPayload.hostPlayerId;
+    const isHostGameOver = Boolean(you && hostId === you);
+    const rematch = playingPayload.rematch;
+
+    const goToNewLobby = (newCode: string, newPlayerId: string) => {
+      savePlayerBinding(newCode, newPlayerId);
+      router.push(`/game/${newCode.toUpperCase()}`);
+    };
+
+    const startRematch = async () => {
+      if (!you) return;
+      setRematchBusy(true);
+      setErr(null);
+      const res = await fetch(`/api/sessions/${c}/rematch/init`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playerId: you }),
+      });
+      setRematchBusy(false);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setErr((j as { error?: string }).error ?? "Could not start new game");
+        return;
+      }
+      const j = (await res.json()) as { code: string; playerId: string };
+      goToNewLobby(j.code, j.playerId);
+    };
+
+    const joinRematch = async () => {
+      if (!you) return;
+      setRematchBusy(true);
+      setErr(null);
+      const res = await fetch(`/api/sessions/${c}/rematch/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playerId: you }),
+      });
+      setRematchBusy(false);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setErr((j as { error?: string }).error ?? "Could not join new game");
+        return;
+      }
+      const j = (await res.json()) as { code: string; playerId: string };
+      goToNewLobby(j.code, j.playerId);
+    };
+
     return (
       <div className="mx-auto max-w-4xl px-4 py-16 text-center">
         <h1 className="text-2xl font-semibold text-stone-900">Game Complete</h1>
@@ -561,6 +622,79 @@ export function GameClient({ code }: { code: string }) {
             </tbody>
           </table>
         </div>
+        <div className="mx-auto mt-10 max-w-md space-y-4 text-left">
+          {isHostGameOver ? (
+            <div className="space-y-2">
+              <p className="text-sm text-stone-600">
+                Start a new lobby with a fresh room code. Other players can choose
+                whether to join from this finished game screen.
+              </p>
+              <PrimaryButton
+                type="button"
+                disabled={rematchBusy || !you}
+                onClick={() => void startRematch()}
+                className="w-full"
+              >
+                {rematchBusy ? "Starting…" : "Start a new game"}
+              </PrimaryButton>
+            </div>
+          ) : rematch?.targetStatus === "lobby" ? (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-stone-800">
+                The host started a new game.
+              </p>
+              {rematch.joinedOldPlayerIds.includes(you ?? "") ? (
+                <Link
+                  href={`/game/${rematch.targetCode}`}
+                  className="inline-flex w-full items-center justify-center rounded-lg bg-amber-600 px-4 py-3 text-center text-base font-medium text-white hover:bg-amber-700"
+                >
+                  Open new lobby
+                </Link>
+              ) : (
+                <PrimaryButton
+                  type="button"
+                  disabled={rematchBusy || !you}
+                  onClick={() => void joinRematch()}
+                  className="w-full"
+                >
+                  {rematchBusy ? "Joining…" : "Join new game"}
+                </PrimaryButton>
+              )}
+            </div>
+          ) : rematch ? (
+            <div className="space-y-2 text-sm text-stone-600">
+              <p>The new game already started.</p>
+              {rematch.joinedOldPlayerIds.includes(you ?? "") ? (
+                <Link
+                  href={`/game/${rematch.targetCode}`}
+                  className="font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900"
+                >
+                  Open game ({rematch.targetCode})
+                </Link>
+              ) : (
+                <p>
+                  Room code:{" "}
+                  <span className="font-mono font-semibold tracking-widest">
+                    {rematch.targetCode}
+                  </span>{" "}
+                  — open{" "}
+                  <Link
+                    href={`/game/${rematch.targetCode}`}
+                    className="font-medium text-amber-800 underline underline-offset-2"
+                  >
+                    /game/{rematch.targetCode}
+                  </Link>{" "}
+                  to join if there is still space.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-stone-500">
+              Waiting for the host to start a new game…
+            </p>
+          )}
+        </div>
+        {err ? <p className="mt-4 text-sm text-red-600">{err}</p> : null}
         <p className="mt-10">
           <Link
             href="/"
@@ -625,39 +759,39 @@ export function GameClient({ code }: { code: string }) {
           to confirm…
         </p>
       ) : null}
-      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
-        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+        <div className="min-w-0 flex-1">
           {myName ? (
-            <p className="max-w-[min(100%,9rem)] shrink truncate text-xl font-semibold tracking-tight text-stone-900 sm:max-w-none md:text-2xl">
+            <p className="max-w-[min(100%,9rem)] truncate text-xl font-semibold tracking-tight text-stone-900 sm:max-w-none md:text-2xl">
               {myName}
             </p>
           ) : null}
-          <div className="flex shrink-0 items-start gap-3 sm:gap-4">
-            <div className="text-center">
-              <p className="font-mono text-base font-semibold tabular-nums text-stone-900">
-                {roundPoints}
-              </p>
-              <p className="text-[0.65rem] leading-tight text-stone-500 sm:text-xs">
-                Round
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="font-mono text-base font-semibold tabular-nums text-stone-900">
-                {gameTotal}
-              </p>
-              <p className="text-[0.65rem] leading-tight text-stone-500 sm:text-xs">
-                Game
-              </p>
-            </div>
-          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowScores(true)}
-          className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
-        >
-          Scores
-        </button>
+        <div className="flex shrink-0 items-end gap-3 sm:gap-4">
+          <div className="text-right">
+            <p className="font-mono text-base font-semibold tabular-nums text-stone-900">
+              {roundPoints}
+            </p>
+            <p className="text-[0.65rem] leading-tight text-stone-500 sm:text-xs">
+              Round
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="font-mono text-base font-semibold tabular-nums text-stone-900">
+              {gameTotal}
+            </p>
+            <p className="text-[0.65rem] leading-tight text-stone-500 sm:text-xs">
+              Game
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowScores(true)}
+            className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
+          >
+            Scores
+          </button>
+        </div>
       </div>
 
       <div className="mt-5 md:mt-8">
@@ -732,66 +866,113 @@ export function GameClient({ code }: { code: string }) {
         </div>
       ) : null}
 
-      <section className="mt-8 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-sm font-medium text-stone-500">Players</p>
+      <section className="mt-8">
+        <div
+          className="flex gap-1.5 rounded-2xl bg-stone-100 p-1.5"
+          role="tablist"
+          aria-label="Activity and other players cards"
+        >
           <button
             type="button"
-            onClick={() => setShowPlayersCards((v) => !v)}
-            className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 hover:bg-stone-50"
+            role="tab"
+            aria-selected={playersSectionTab === "activity"}
+            onClick={() => setPlayersSectionTab("activity")}
+            className={`flex-1 rounded-2xl px-3 py-2.5 text-sm font-semibold transition-colors ${
+              playersSectionTab === "activity"
+                ? "bg-white text-stone-900 shadow-sm"
+                : "text-stone-600 hover:text-stone-800"
+            }`}
           >
-            {showPlayersCards ? "Hide Cards" : "Show Cards"}
+            Activity
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={playersSectionTab === "cards"}
+            onClick={() => setPlayersSectionTab("cards")}
+            className={`flex-1 rounded-2xl px-3 py-2.5 text-sm font-semibold transition-colors ${
+              playersSectionTab === "cards"
+                ? "bg-white text-stone-900 shadow-sm"
+                : "text-stone-600 hover:text-stone-800"
+            }`}
+          >
+            Cards
           </button>
         </div>
-        <div className="mt-4 space-y-6" aria-label="Players">
-          {playersBySeat
-            .filter((p) => p.id !== you)
-            .map((p) => {
-              const board = gs.boards[p.id];
-              const suffix = doneSuffix(board);
-              const isTurn = currentPid === p.id;
-              const otherModsRow = board ? renderBoardModsRow(board, true) : null;
-              return (
-                <div key={p.id}>
-                  <p className="text-sm text-stone-700">
-                    {isTurn ? (
-                      <span className="font-bold text-stone-900">
-                        {p.name}&apos;s Turn{".".repeat(turnDotCount)}
-                        {suffix ? (
-                          <span className="font-normal text-stone-500">
-                            {" "}
-                            {suffix}
+
+        {playersSectionTab === "activity" ? (
+          <div className="mt-4" role="tabpanel">
+            {!playerId ? (
+              <p className="text-sm text-stone-500">
+                Join this device to see other players&apos; activity.
+              </p>
+            ) : (
+              <GroupFeed
+                entries={visibleGroupFeed}
+                players={playingPayload?.players ?? []}
+              />
+            )}
+          </div>
+        ) : (
+          <div className="mt-4" role="tabpanel">
+            <div className="space-y-6" aria-label="Players cards">
+              {playersBySeat
+                .filter((p) => p.id !== you)
+                .map((p) => {
+                  const board = gs.boards[p.id];
+                  const suffix = doneSuffix(board);
+                  const isTurn = currentPid === p.id;
+                  const otherModsRow = board
+                    ? renderBoardModsRow(board, true)
+                    : null;
+                  return (
+                    <div key={p.id}>
+                      <p className="text-sm text-stone-700">
+                        {isTurn ? (
+                          <span className="font-bold text-stone-900">
+                            {p.name}&apos;s Turn{".".repeat(turnDotCount)}
+                            {suffix ? (
+                              <span className="font-normal text-stone-500">
+                                {" "}
+                                {suffix}
+                              </span>
+                            ) : null}
                           </span>
-                        ) : null}
-                      </span>
-                    ) : (
-                      <>
-                        <span className="font-medium">{p.name}</span>
-                        {suffix ? (
-                          <span className="font-normal text-stone-500">
-                            {" "}
-                            {suffix}
-                          </span>
-                        ) : null}
-                      </>
-                    )}
-                  </p>
-                  {showPlayersCards && board ? (
-                    <div className="mt-2 space-y-2">
-                      <div className="grid w-full grid-cols-7 gap-1.5">
-                        {renderBoardNumberRow(board, NO_DUP_FLASH, false, true)}
-                      </div>
-                      {otherModsRow ? (
-                        <div className="grid w-full grid-cols-7 gap-1.5">
-                          {otherModsRow}
+                        ) : (
+                          <>
+                            <span className="font-medium">{p.name}</span>
+                            {suffix ? (
+                              <span className="font-normal text-stone-500">
+                                {" "}
+                                {suffix}
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+                      </p>
+                      {board ? (
+                        <div className="mt-2 space-y-2">
+                          <div className="grid w-full grid-cols-7 gap-1.5">
+                            {renderBoardNumberRow(
+                              board,
+                              NO_DUP_FLASH,
+                              false,
+                              true,
+                            )}
+                          </div>
+                          {otherModsRow ? (
+                            <div className="grid w-full grid-cols-7 gap-1.5">
+                              {otherModsRow}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
-                  ) : null}
-                </div>
-              );
-            })}
-        </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
       </section>
 
       {showScores ? (

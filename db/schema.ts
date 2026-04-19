@@ -6,6 +6,7 @@ import {
   timestamp,
   jsonb,
   uniqueIndex,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const sessions = pgTable(
@@ -15,6 +16,10 @@ export const sessions = pgTable(
     code: text("code").notNull(),
     status: text("status").notNull().$type<"lobby" | "playing" | "finished">(),
     hostPlayerId: uuid("host_player_id"),
+    rematchTargetSessionId: uuid("rematch_target_session_id").references(
+      (): AnyPgColumn => sessions.id,
+      { onDelete: "set null" }
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -29,6 +34,10 @@ export const players = pgTable("players", {
     .references(() => sessions.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   seatOrder: integer("seat_order").notNull(),
+  rematchFromPlayerId: uuid("rematch_from_player_id").references(
+    (): AnyPgColumn => players.id,
+    { onDelete: "set null" }
+  ),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

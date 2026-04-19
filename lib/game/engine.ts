@@ -1,8 +1,123 @@
 import { buildDeck, shuffle } from "./deck";
+import { appendGroupFeed } from "./group-feed";
 import type { ActionResume, Card, GameState, PlayerBoard } from "./types";
 import { hasFlipSeven, isActive, scoreBoard } from "./rules";
 
 const WIN = 200;
+
+function withFeedDrewCard(
+  state: GameState,
+  actorId: string,
+  card: Card,
+): GameState {
+  return appendGroupFeed(state, {
+    kind: "drew_card",
+    roundIndex: state.roundIndex,
+    actorId,
+    card,
+  });
+}
+
+function withFeedActionWaiting(
+  state: GameState,
+  actorId: string,
+  card: Card & { k: "a" },
+): GameState {
+  return appendGroupFeed(state, {
+    kind: "action_waiting",
+    roundIndex: state.roundIndex,
+    actorId,
+    card,
+  });
+}
+
+function withFeedGaveAction(
+  state: GameState,
+  actorId: string,
+  targetId: string,
+  card: Card & { k: "a" },
+): GameState {
+  return appendGroupFeed(state, {
+    kind: "gave_action",
+    roundIndex: state.roundIndex,
+    actorId,
+    targetId,
+    card,
+  });
+}
+
+function withFeedDuplicateOut(
+  state: GameState,
+  actorId: string,
+  numberValue: number,
+): GameState {
+  return appendGroupFeed(state, {
+    kind: "duplicate_out",
+    roundIndex: state.roundIndex,
+    actorId,
+    numberValue,
+  });
+}
+
+function withFeedDuplicateSaved(
+  state: GameState,
+  actorId: string,
+  numberValue: number,
+): GameState {
+  return appendGroupFeed(state, {
+    kind: "duplicate_saved",
+    roundIndex: state.roundIndex,
+    actorId,
+    numberValue,
+  });
+}
+
+function withFeedFlip7Bonus(state: GameState, actorId: string): GameState {
+  return appendGroupFeed(state, {
+    kind: "flip7_bonus",
+    roundIndex: state.roundIndex,
+    actorId,
+  });
+}
+
+function withFeedStayed(state: GameState, actorId: string): GameState {
+  return appendGroupFeed(state, {
+    kind: "stayed",
+    roundIndex: state.roundIndex,
+    actorId,
+  });
+}
+
+function maybeFeedFlip7(
+  state: GameState,
+  prevBoard: PlayerBoard,
+  newBoard: PlayerBoard,
+  playerId: string,
+): GameState {
+  const had = hasFlipSeven(prevBoard.nums);
+  const has = hasFlipSeven(newBoard.nums);
+  if (!had && has && newBoard.status !== "bust") {
+    return withFeedFlip7Bonus(state, playerId);
+  }
+  return state;
+}
+
+function afterNumberDraw(
+  state: GameState,
+  actorId: string,
+  card: Card & { k: "n" },
+  prevBoard: PlayerBoard,
+  r: { board: PlayerBoard; busted: boolean },
+): GameState {
+  let s = withFeedDrewCard(state, actorId, card);
+  if (r.busted) {
+    s = withFeedDuplicateOut(s, actorId, card.v);
+  } else if (r.board.secondChanceRevealCard) {
+    s = withFeedDuplicateSaved(s, actorId, card.v);
+  }
+  s = maybeFeedFlip7(s, prevBoard, r.board, actorId);
+  return s;
+}
 
 /** Round just ended (summary) or game ended — stop advancing play */
 function roundOrGameEnded(phase: GameState["phase"]): boolean {
@@ -102,6 +217,8 @@ export function createNewGame(seats: string[], dealerSeat: number): GameState {
     roundIndex: 1,
     roundScoresHistory: [],
     pendingTargetAck: null,
+    groupFeed: [],
+    groupFeedSeq: 0,
   };
 }
 
@@ -245,6 +362,8 @@ function startNextRound(prev: GameState): GameState {
     discardPile: [],
     roundIndex: prev.roundIndex + 1,
     pendingTargetAck: null,
+    groupFeed: [],
+    groupFeedSeq: 0,
   };
 }
 
@@ -372,31 +491,36 @@ function runFlipThree(
     const c = p.card;
 
     if (c.k === "n") {
-      const r = applyNumber(s.boards[targetPid], c);
+      const prevB = s.boards[targetPid];
+      const r = applyNumber(prevB, c);
       s = withBoard(s, targetSeat, r.board);
+      s = afterNumberDraw(s, targetPid, c, prevB, r);
       if (r.busted) {
         flipBust = true;
         break;
       }
       if (hasFlipSeven(s.boards[targetPid].nums)) break;
     } else if (c.k === "m") {
-      s = withBoard(
-        s,
-        targetSeat,
-        applyModifier(s.boards[targetPid], c)
-      );
+      const prevB = s.boards[targetPid];
+      const nextB = applyModifier(prevB, c);
+      s = withBoard(s, targetSeat, nextB);
+      s = withFeedDrewCard(s, targetPid, c);
+      s = maybeFeedFlip7(s, prevB, nextB, targetPid);
     } else if (c.v === "second") {
       const b = s.boards[targetPid];
       if (!b.secondChance) {
+        s = withFeedDrewCard(s, targetPid, c);
         s = withBoard(s, targetSeat, {
           ...b,
           secondChance: true,
           secondChanceRevealCard: undefined,
         });
       } else {
+        s = withFeedDrewCard(s, targetPid, c);
         deferred.push(c);
       }
     } else {
+      s = withFeedDrewCard(s, targetPid, c);
       deferred.push(c);
     }
   }
@@ -415,8 +539,9 @@ function runFlipThree(
 
   if (deferred.length > 0) {
     const [first, ...rest] = deferred;
+    if (first.k !== "a") throw new Error("Deferred flip3 card must be action");
     return {
-      ...s,
+      ...withFeedActionWaiting(s, targetPid, first),
       phase: {
         t: "choose_action",
         chooserSeat: targetSeat,
@@ -443,8 +568,9 @@ function afterChooseAction(
       return applyResume(state, resume);
     }
     const [first, ...rest] = deferred;
+    if (first.k !== "a") throw new Error("Deferred flip3 card must be action");
     return {
-      ...state,
+      ...withFeedActionWaiting(state, chooserPid, first),
       phase: {
         t: "choose_action",
         chooserSeat,
@@ -474,11 +600,12 @@ function applyActionCardAsChooser(
 ): GameState {
   const targetSeat = seatOf(s, targetPlayerId);
   const targetPid = targetPlayerId;
+  const sGift = withFeedGaveAction(s, chooserPlayerId, targetPlayerId, card);
 
   if (card.v === "freeze") {
-    const tb = s.boards[targetPid];
+    const tb = sGift.boards[targetPid];
     if (!isActive(tb)) throw new Error("Invalid target");
-    let out = s;
+    let out = sGift;
     out = withBoard(out, targetSeat, {
       ...tb,
       status: "frozen",
@@ -494,22 +621,22 @@ function applyActionCardAsChooser(
   }
 
   if (card.v === "flip3") {
-    const tb = s.boards[targetPid];
+    const tb = sGift.boards[targetPid];
     if (!isActive(tb)) throw new Error("Invalid target");
     return runFlipThree(
-      withPendingTargetAck(s, targetPid, chooserPlayerId, card),
+      withPendingTargetAck(sGift, targetPid, chooserPlayerId, card),
       targetSeat,
       resume,
     );
   }
 
   if (card.v === "second") {
-    const tb = s.boards[targetPid];
+    const tb = sGift.boards[targetPid];
     if (!isActive(tb)) throw new Error("Invalid target");
     if (tb.secondChance) {
       throw new Error("Pick another player — they already have Second Chance");
     }
-    let out = withBoard(s, targetSeat, {
+    let out = withBoard(sGift, targetSeat, {
       ...tb,
       secondChance: true,
       secondChanceRevealCard: undefined,
@@ -583,6 +710,7 @@ export function runDealFromIndex(state: GameState): GameState {
       const pid = pidAt(s, seat);
       const only = onlyActivePlayerId(s);
       if (only && only === pid) {
+        s = withFeedDrewCard(s, pid, card);
         return applyActionCardAsChooser(
           s,
           seat,
@@ -594,6 +722,8 @@ export function runDealFromIndex(state: GameState): GameState {
           true,
         );
       }
+      s = withFeedDrewCard(s, pid, card);
+      s = withFeedActionWaiting(s, pid, card);
       return {
         ...s,
         phase: {
@@ -607,14 +737,18 @@ export function runDealFromIndex(state: GameState): GameState {
     }
 
     if (card.k === "m") {
-      s = withBoard(
-        s,
-        seat,
-        applyModifier(s.boards[pidAt(s, seat)], card)
-      );
+      const pid = pidAt(s, seat);
+      const prevB = s.boards[pid];
+      const nextB = applyModifier(prevB, card);
+      s = withBoard(s, seat, nextB);
+      s = withFeedDrewCard(s, pid, card);
+      s = maybeFeedFlip7(s, prevB, nextB, pid);
     } else {
-      const r = applyNumber(s.boards[pidAt(s, seat)], card);
+      const pid = pidAt(s, seat);
+      const prevB = s.boards[pid];
+      const r = applyNumber(prevB, card);
       s = withBoard(s, seat, r.board);
+      s = afterNumberDraw(s, pid, card, prevB, r);
     }
 
     idx += 1;
@@ -639,8 +773,10 @@ export function submitHit(state: GameState, playerId: string): GameState {
   const card = p.card;
 
   if (card.k === "n") {
-    const r = applyNumber(s.boards[playerId], card);
+    const prevB = s.boards[playerId];
+    const r = applyNumber(prevB, card);
     s = withBoard(s, seat, r.board);
+    s = afterNumberDraw(s, playerId, card, prevB, r);
     if (r.busted) {
       s = maybeFinishRoundAfterBust(s, playerId);
     } else {
@@ -651,7 +787,11 @@ export function submitHit(state: GameState, playerId: string): GameState {
   }
 
   if (card.k === "m") {
-    s = withBoard(s, seat, applyModifier(s.boards[playerId], card));
+    const prevB = s.boards[playerId];
+    const nextB = applyModifier(prevB, card);
+    s = withBoard(s, seat, nextB);
+    s = withFeedDrewCard(s, playerId, card);
+    s = maybeFeedFlip7(s, prevB, nextB, playerId);
     s = maybeFinishRound(s);
     if (roundOrGameEnded(s.phase)) return s;
     return advanceTurnAfter(s, seat);
@@ -660,6 +800,7 @@ export function submitHit(state: GameState, playerId: string): GameState {
   if (card.k === "a") {
     const only = onlyActivePlayerId(s);
     if (only && only === playerId) {
+      s = withFeedDrewCard(s, playerId, card);
       return applyActionCardAsChooser(
         s,
         seat,
@@ -673,6 +814,8 @@ export function submitHit(state: GameState, playerId: string): GameState {
     }
   }
 
+  s = withFeedDrewCard(s, playerId, card);
+  s = withFeedActionWaiting(s, playerId, card);
   return {
     ...s,
     phase: {
@@ -703,6 +846,7 @@ export function submitStay(state: GameState, playerId: string): GameState {
       },
     },
   };
+  s = withFeedStayed(s, playerId);
   s = maybeFinishRound(s);
   if (roundOrGameEnded(s.phase)) return s;
   return advanceTurnAfter(s, seat);
