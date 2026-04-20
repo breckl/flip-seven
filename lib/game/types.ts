@@ -74,7 +74,9 @@ export type GroupFeedKind =
   | "stayed"
   | "duplicate_out"
   | "duplicate_saved"
-  | "flip7_bonus";
+  | "flip7_bonus"
+  /** Solo last active player drew a second Second Chance; card discarded (no other target). */
+  | "second_chance_discarded";
 
 /** Server-append-only activity log for the group feed UI (JSON-serializable). */
 export type GroupFeedEntry = {

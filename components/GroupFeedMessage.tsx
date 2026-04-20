@@ -156,6 +156,18 @@ export function GroupFeedMessage({
           <span className="text-stone-900">!</span>
         </p>
       );
+    case "second_chance_discarded":
+      return (
+        <p className="text-sm leading-relaxed text-stone-900">
+          <span className={nameCls}>{actor}</span>
+          <span className="text-stone-900"> discarded a </span>
+          <span className={secondCls}>Second Chance</span>
+          <span className="text-stone-900">
+            {" "}
+            (already had one — no other player to give it to).
+          </span>
+        </p>
+      );
     default:
       return null;
   }

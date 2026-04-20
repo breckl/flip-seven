@@ -214,6 +214,20 @@ export function usePlayerHandMessages(
       return;
     }
 
+    // --- Second Chance duplicate discarded (solo last active player) ---
+    const feed = gs.groupFeed ?? [];
+    for (const e of feed) {
+      if (e.kind === "second_chance_discarded" && e.actorId === you) {
+        const scFill = SECOND_CHANCE_FILL;
+        tryPush({
+          id: `sc-dup-discard-${e.id}`,
+          backgroundColor: scFill,
+          borderColor: darkerOutline(scFill),
+          text: "You already have a Second Chance — the extra card was discarded.",
+        });
+      }
+    }
+
     // --- Second Chance save (reveal card) ---
     if (phase.t !== "bust_reveal") {
       const rev = board.secondChanceRevealCard;

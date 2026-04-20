@@ -88,6 +88,19 @@ function withFeedStayed(state: GameState, actorId: string): GameState {
   });
 }
 
+function withFeedSecondChanceDiscarded(
+  state: GameState,
+  actorId: string,
+  card: Card & { k: "a"; v: "second" },
+): GameState {
+  return appendGroupFeed(state, {
+    kind: "second_chance_discarded",
+    roundIndex: state.roundIndex,
+    actorId,
+    card,
+  });
+}
+
 function maybeFeedFlip7(
   state: GameState,
   prevBoard: PlayerBoard,
@@ -600,6 +613,22 @@ function applyActionCardAsChooser(
 ): GameState {
   const targetSeat = seatOf(s, targetPlayerId);
   const targetPid = targetPlayerId;
+
+  /** Last active player only: cannot hold two Second Chances or give one away — discard the extra. */
+  if (card.v === "second" && soloOnly) {
+    const tb = s.boards[targetPid];
+    if (tb.secondChance) {
+      let out: GameState = {
+        ...s,
+        discardPile: [...s.discardPile, card],
+      };
+      out = withFeedSecondChanceDiscarded(out, chooserPlayerId, card);
+      out = maybeFinishRound(out);
+      if (roundOrGameEnded(out.phase)) return out;
+      return afterChooseAction(out, resume, deferred, chooserSeat);
+    }
+  }
+
   const sGift = withFeedGaveAction(s, chooserPlayerId, targetPlayerId, card);
 
   if (card.v === "freeze") {
