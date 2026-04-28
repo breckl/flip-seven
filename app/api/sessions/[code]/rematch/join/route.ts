@@ -62,6 +62,9 @@ export async function POST(req: Request, ctx: RouteParams) {
     if (!oldPlayer || oldPlayer.sessionId !== session.id) {
       return NextResponse.json({ error: "Invalid player" }, { status: 403 });
     }
+    if (oldPlayer.isBot) {
+      return NextResponse.json({ error: "Bots cannot join from this screen" }, { status: 400 });
+    }
 
     const target = await findSessionById(session.rematchTargetSessionId);
     if (!target) {
@@ -111,6 +114,7 @@ export async function POST(req: Request, ctx: RouteParams) {
       .values({
         sessionId: target.id,
         name: oldPlayer.name,
+        isBot: false,
         seatOrder: count,
         rematchFromPlayerId: playerId,
       })

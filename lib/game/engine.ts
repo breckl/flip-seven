@@ -1,6 +1,12 @@
 import { buildDeck, shuffle } from "./deck";
 import { appendGroupFeed } from "./group-feed";
-import type { ActionResume, Card, GameState, PlayerBoard } from "./types";
+import type {
+  ActionResume,
+  Card,
+  GameState,
+  PlayerBoard,
+  RoundEndReason,
+} from "./types";
 import { hasFlipSeven, isActive, scoreBoard } from "./rules";
 
 const WIN = 200;
@@ -319,6 +325,19 @@ function mustDiscardDuplicateSecondChance(
   return !alternateRecipientExists;
 }
 
+/** Flip 7 wins when present; otherwise everyone inactive (no playable boards left). */
+function deriveRoundEndReason(
+  state: GameState,
+): Extract<RoundEndReason, { kind: "flip7" } | { kind: "no_active_players" }> {
+  if (roundEndedByFlip7(state)) {
+    const playerIds = state.seats.filter((id) =>
+      hasFlipSeven(state.boards[id].nums),
+    );
+    return { kind: "flip7", playerIds };
+  }
+  return { kind: "no_active_players" };
+}
+
 function collectRoundCardsToDiscard(state: GameState): Card[] {
   const out: Card[] = [];
   for (const id of state.seats) {
@@ -347,17 +366,21 @@ function applyTotalsAndCheckGameOver(state: GameState): GameState {
   const leaders = state.seats.filter((id) => (totals[id] ?? 0) === max);
   const any200 = state.seats.some((id) => (totals[id] ?? 0) >= WIN);
 
+  const roundEndReason = deriveRoundEndReason(state);
+
   if (any200 && leaders.length === 1) {
+    const winnerPlayerId = leaders[0];
     return {
       ...state,
       totals,
       roundScoresHistory,
       phase: {
         t: "game_summary",
-        winnerSeat: state.seats.indexOf(leaders[0]),
+        winnerSeat: state.seats.indexOf(winnerPlayerId),
         roundIndex: state.roundIndex,
         roundScores,
         acknowledged: [],
+        endReason: { kind: "score_cap", winnerPlayerId },
       },
     };
   }
@@ -371,6 +394,7 @@ function applyTotalsAndCheckGameOver(state: GameState): GameState {
       roundIndex: state.roundIndex,
       roundScores,
       acknowledged: [],
+      endReason: roundEndReason,
     },
   };
 }
@@ -397,6 +421,7 @@ function startNextRound(prev: GameState): GameState {
     pendingTargetAck: null,
     groupFeed: [],
     groupFeedSeq: 0,
+    testScenarioId: undefined,
   };
 }
 

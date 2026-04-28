@@ -3,6 +3,7 @@ import {
   uuid,
   text,
   integer,
+  boolean,
   timestamp,
   jsonb,
   uniqueIndex,
@@ -33,6 +34,7 @@ export const players = pgTable("players", {
     .notNull()
     .references(() => sessions.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  isBot: boolean("is_bot").notNull().default(false),
   seatOrder: integer("seat_order").notNull(),
   rematchFromPlayerId: uuid("rematch_from_player_id").references(
     (): AnyPgColumn => players.id,

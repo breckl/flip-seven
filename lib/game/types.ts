@@ -1,3 +1,10 @@
+/** Why the round or game transitioned to scoring (for UI copy before scores). */
+export type RoundEndReason =
+  | { kind: "flip7"; playerIds: string[] }
+  | { kind: "no_active_players" }
+  /** Someone reached the score cap this round — phase will be game_summary */
+  | { kind: "score_cap"; winnerPlayerId: string };
+
 /** JSON-serializable card (94-card deck) */
 export type Card =
   | { k: "n"; v: number }
@@ -49,6 +56,8 @@ export type GamePhase =
       roundIndex: number;
       roundScores: Record<string, number>;
       acknowledged: string[];
+      /** Shown once before score breakdown (optional for older saved states). */
+      endReason?: RoundEndReason;
     }
   /** Someone reached 200 with a clear winner; wait for acks before game_over */
   | {
@@ -57,6 +66,7 @@ export type GamePhase =
       roundIndex: number;
       roundScores: Record<string, number>;
       acknowledged: string[];
+      endReason?: RoundEndReason;
     }
   | { t: "game_over"; winnerSeat: number | null };
 
@@ -108,4 +118,6 @@ export type GameState = {
   groupFeed?: GroupFeedEntry[];
   /** Monotonic counter for feed entry ids */
   groupFeedSeq?: number;
+  /** Dev/test: which canned scenario was loaded (optional). */
+  testScenarioId?: string;
 };

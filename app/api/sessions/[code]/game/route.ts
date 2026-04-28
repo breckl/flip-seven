@@ -35,6 +35,7 @@ export async function GET(_req: Request, ctx: RouteParams) {
           players: players.map((p) => ({
             id: p.id,
             name: p.name,
+            isBot: p.isBot,
             seatOrder: p.seatOrder,
           })),
         },

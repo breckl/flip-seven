@@ -45,6 +45,7 @@ export async function POST(req: Request, ctx: RouteParams) {
     .values({
       sessionId: session.id,
       name,
+      isBot: false,
       seatOrder: count,
     })
     .returning();

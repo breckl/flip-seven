@@ -20,13 +20,14 @@ function dbErrorMessage(err: unknown): string {
 }
 
 export async function POST(req: Request) {
-  let body: { name?: string };
+  let body: { name?: string; addComputerPlayer?: boolean };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
   const name = String(body.name ?? "").trim();
+  const addComputerPlayer = body.addComputerPlayer === true;
   if (!name || name.length > 40) {
     return NextResponse.json({ error: "Invalid name" }, { status: 400 });
   }
@@ -61,9 +62,18 @@ export async function POST(req: Request) {
           .values({
             sessionId: sess.id,
             name,
+            isBot: false,
             seatOrder: 0,
           })
           .returning();
+        if (addComputerPlayer) {
+          await tx.insert(players).values({
+            sessionId: sess.id,
+            name: "Computer",
+            isBot: true,
+            seatOrder: 1,
+          });
+        }
         await tx
           .update(sessions)
           .set({ hostPlayerId: host.id })

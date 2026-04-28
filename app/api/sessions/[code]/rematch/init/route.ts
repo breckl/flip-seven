@@ -99,6 +99,12 @@ export async function POST(req: Request, ctx: RouteParams) {
     const oldSessionId = session.id;
     const oldHostPlayerId = hostPlayer.id;
     const hostName = hostPlayer.name;
+    const oldPlayers = await db
+      .select()
+      .from(players)
+      .where(eq(players.sessionId, oldSessionId))
+      .orderBy(players.seatOrder);
+    const botPlayers = oldPlayers.filter((p) => p.isBot);
 
     for (let attempt = 0; attempt < 8; attempt++) {
       const newCode = generateSessionCode();
@@ -116,10 +122,19 @@ export async function POST(req: Request, ctx: RouteParams) {
             .values({
               sessionId: sess.id,
               name: hostName,
+              isBot: false,
               seatOrder: 0,
               rematchFromPlayerId: oldHostPlayerId,
             })
             .returning();
+          for (let i = 0; i < botPlayers.length; i++) {
+            await tx.insert(players).values({
+              sessionId: sess.id,
+              name: botPlayers[i].name,
+              isBot: true,
+              seatOrder: i + 1,
+            });
+          }
           await tx
             .update(sessions)
             .set({ hostPlayerId: host.id })

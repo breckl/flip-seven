@@ -3,11 +3,13 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { sessions } from "@/db/schema";
 import { applyMove, type ClientMove } from "@/lib/server/apply-move";
+import { applyBotAutoplay } from "@/lib/server/bot";
 import {
   findPlayer,
   findSessionByCode,
   getGameRow,
   getPlayingSessionBody,
+  listPlayers,
   updateGameState,
 } from "@/lib/server/session-queries";
 import type { GameState } from "@/lib/game/types";
@@ -56,6 +58,9 @@ export async function POST(req: Request, ctx: RouteParams) {
   let state = row.state as GameState;
   try {
     state = applyMove(state, playerId, move);
+    const players = await listPlayers(session.id);
+    const botIds = players.filter((p) => p.isBot).map((p) => p.id);
+    state = applyBotAutoplay(state, botIds);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Invalid move";
     return NextResponse.json({ error: msg }, { status: 400 });

@@ -10,6 +10,11 @@ import { useDuplicateFlash } from "@/components/useDuplicateFlash";
 import { usePlayerHandMessages } from "@/hooks/usePlayerHandMessages";
 import { loadPlayerId, savePlayerBinding } from "@/lib/client/player-storage";
 import { PrimaryButton } from "@/components/ui/PrimaryButton";
+import { RoundWhyGate } from "@/components/RoundWhyGate";
+import {
+  HOST_TEST_TRIGGER_SUBSTRING,
+  TEST_SCENARIO_ID_DUP_SECOND_SOLE,
+} from "@/lib/game/test-scenarios";
 import {
   cardLabel,
   duplicateNumberIndices,
@@ -19,7 +24,7 @@ import {
 import type { RematchPayload } from "@/lib/rematch-payload";
 import type { Card, GamePhase, GameState, PlayerBoard } from "@/lib/game/types";
 
-type PlayerRow = { id: string; name: string; seatOrder: number };
+type PlayerRow = { id: string; name: string; isBot: boolean; seatOrder: number };
 
 type LobbyPayload = {
   status: "lobby";
@@ -331,12 +336,23 @@ export function GameClient({ code }: { code: string }) {
               className="rounded-lg border border-stone-200 bg-white px-4 py-3"
             >
               {p.name}
+              {p.isBot ? (
+                <span className="ml-2 text-xs text-sky-700">(computer)</span>
+              ) : null}
               {data.hostPlayerId === p.id ? (
                 <span className="ml-2 text-xs text-amber-700">(host)</span>
               ) : null}
             </li>
           ))}
         </ul>
+        {isHost && canStart && hostName?.includes(HOST_TEST_TRIGGER_SUBSTRING) ? (
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <span className="font-semibold">Test mode:</span> With exactly two players,
+            Start loads a mid-game scenario — you will be the only active player with
+            Second Chance already on your board; your next Hit draws another Second
+            Chance (discarded as sole player).
+          </p>
+        ) : null}
         {isHost ? (
           <PrimaryButton
             onClick={() => void startGame()}
@@ -366,6 +382,20 @@ export function GameClient({ code }: { code: string }) {
   const gs = playingPayload.game.state;
   const players = playingPayload.players;
   const you = playerId;
+  const nameOfPlayer = (id: string) =>
+    players.find((p) => p.id === id)?.name ?? "Player";
+
+  const testScenarioBanner =
+    gs.testScenarioId === TEST_SCENARIO_ID_DUP_SECOND_SOLE ? (
+      <div
+        role="status"
+        className="fixed left-0 right-0 top-0 z-[70] border-b border-amber-300 bg-amber-100 px-3 py-2 text-center text-xs leading-snug text-amber-950"
+      >
+        Test mode (host name contains {HOST_TEST_TRIGGER_SUBSTRING}): duplicate Second
+        Chance — you have Second Chance as the sole active player. Tap Hit to draw
+        another (it will be discarded).
+      </div>
+    ) : null;
 
   if (gs.phase.t === "round_summary") {
     const ph = gs.phase;
@@ -376,53 +406,62 @@ export function GameClient({ code }: { code: string }) {
       return b && b.status !== "bust" && hasFlipSeven(b.nums);
     });
     return (
-      <div className="mx-auto max-w-lg px-4 py-8">
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl bg-white p-6 shadow-xl">
-            <h2 className="text-xl font-semibold text-stone-900">
-              Round {ph.roundIndex} complete.
-            </h2>
-            <p className="mt-1 text-sm text-stone-500">
-              {ph.acknowledged.length} / {players.length} players ready
-            </p>
-            {flipSevenThisRound.length > 0 ? (
-              <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                Flip 7 (+15 each):{" "}
-                {flipSevenThisRound.map((p) => p.name).join(", ")}
+      <>
+        {testScenarioBanner}
+        <RoundWhyGate
+          gateKey={`rs-${ph.roundIndex}`}
+          reason={ph.endReason}
+          nameOf={nameOfPlayer}
+        >
+        <div className="mx-auto max-w-lg px-4 py-8">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+            <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl bg-white p-6 shadow-xl">
+              <h2 className="text-xl font-semibold text-stone-900">
+                Round {ph.roundIndex} complete.
+              </h2>
+              <p className="mt-1 text-sm text-stone-500">
+                {ph.acknowledged.length} / {players.length} players ready
               </p>
-            ) : null}
-            <table className="mt-6 w-full text-sm">
-              <thead>
-                <tr className="border-b border-stone-200 text-left text-stone-500">
-                  <th className="pb-2 pr-2">Player</th>
-                  <th className="pb-2 pr-2 text-right">Round</th>
-                  <th className="pb-2 text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((p) => (
-                  <tr key={p.id} className="border-b border-stone-100">
-                    <td className="py-2 pr-2">{p.name}</td>
-                    <td className="py-2 pr-2 text-right font-mono">
-                      {ph.roundScores[p.id] ?? 0}
-                    </td>
-                    <td className="py-2 text-right font-mono">
-                      {gs.totals[p.id] ?? 0}
-                    </td>
+              {flipSevenThisRound.length > 0 ? (
+                <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                  Flip 7 (+15 each):{" "}
+                  {flipSevenThisRound.map((p) => p.name).join(", ")}
+                </p>
+              ) : null}
+              <table className="mt-6 w-full text-sm">
+                <thead>
+                  <tr className="border-b border-stone-200 text-left text-stone-500">
+                    <th className="pb-2 pr-2">Player</th>
+                    <th className="pb-2 pr-2 text-right">Round</th>
+                    <th className="pb-2 text-right">Total</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <PrimaryButton
-              disabled={acked || !you}
-              onClick={() => void postMove({ type: "ACK_ROUND_SUMMARY" })}
-              className="mt-8 w-full"
-            >
-              {acked ? "Waiting for other players…" : "Start Next Round"}
-            </PrimaryButton>
+                </thead>
+                <tbody>
+                  {sorted.map((p) => (
+                    <tr key={p.id} className="border-b border-stone-100">
+                      <td className="py-2 pr-2">{p.name}</td>
+                      <td className="py-2 pr-2 text-right font-mono">
+                        {ph.roundScores[p.id] ?? 0}
+                      </td>
+                      <td className="py-2 text-right font-mono">
+                        {gs.totals[p.id] ?? 0}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <PrimaryButton
+                disabled={acked || !you}
+                onClick={() => void postMove({ type: "ACK_ROUND_SUMMARY" })}
+                className="mt-8 w-full"
+              >
+                {acked ? "Waiting for other players…" : "Start Next Round"}
+              </PrimaryButton>
+            </div>
           </div>
         </div>
-      </div>
+      </RoundWhyGate>
+      </>
     );
   }
 
@@ -436,72 +475,81 @@ export function GameClient({ code }: { code: string }) {
       return b && b.status !== "bust" && hasFlipSeven(b.nums);
     });
     return (
-      <div className="mx-auto max-w-lg px-4 py-8">
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl bg-white p-6 shadow-xl">
-            <h2 className="text-xl font-semibold text-stone-900">
-              Game Complete
-            </h2>
-            <p className="mt-1 text-sm text-stone-500">
-              {ph.acknowledged.length} / {players.length} players acknowledged
-            </p>
-            {flipSevenFinalRound.length > 0 ? (
-              <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                Flip 7 (+15 each):{" "}
-                {flipSevenFinalRound.map((p) => p.name).join(", ")}
+      <>
+        {testScenarioBanner}
+        <RoundWhyGate
+          gateKey={`gs-${ph.roundIndex}`}
+          reason={ph.endReason}
+          nameOf={nameOfPlayer}
+        >
+        <div className="mx-auto max-w-lg px-4 py-8">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+            <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl bg-white p-6 shadow-xl">
+              <h2 className="text-xl font-semibold text-stone-900">
+                Game Complete
+              </h2>
+              <p className="mt-1 text-sm text-stone-500">
+                {ph.acknowledged.length} / {players.length} players acknowledged
               </p>
-            ) : null}
-            <table className="mt-6 w-full text-sm">
-              <thead>
-                <tr className="border-b border-stone-200 text-left text-stone-500">
-                  <th className="pb-2 pr-2">Player</th>
-                  <th className="pb-2 pr-2 text-right">Round</th>
-                  <th className="pb-2 text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((p) => {
-                  const win = p.id === winnerPid;
-                  return (
-                    <tr
-                      key={p.id}
-                      className={
-                        win
-                          ? "border-b border-stone-100 font-bold text-green-700"
-                          : "border-b border-stone-100"
-                      }
-                    >
-                      <td
-                        className={`py-2 pr-2 ${win ? "text-green-700" : ""}`}
+              {flipSevenFinalRound.length > 0 ? (
+                <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                  Flip 7 (+15 each):{" "}
+                  {flipSevenFinalRound.map((p) => p.name).join(", ")}
+                </p>
+              ) : null}
+              <table className="mt-6 w-full text-sm">
+                <thead>
+                  <tr className="border-b border-stone-200 text-left text-stone-500">
+                    <th className="pb-2 pr-2">Player</th>
+                    <th className="pb-2 pr-2 text-right">Round</th>
+                    <th className="pb-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((p) => {
+                    const win = p.id === winnerPid;
+                    return (
+                      <tr
+                        key={p.id}
+                        className={
+                          win
+                            ? "border-b border-stone-100 font-bold text-green-700"
+                            : "border-b border-stone-100"
+                        }
                       >
-                        {p.name}
-                        {win ? " — Winner" : ""}
-                      </td>
-                      <td
-                        className={`py-2 pr-2 text-right font-mono ${win ? "text-green-700" : ""}`}
-                      >
-                        {ph.roundScores[p.id] ?? 0}
-                      </td>
-                      <td
-                        className={`py-2 text-right font-mono ${win ? "text-green-700" : ""}`}
-                      >
-                        {gs.totals[p.id] ?? 0}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <PrimaryButton
-              disabled={acked || !you}
-              onClick={() => void postMove({ type: "ACK_GAME_SUMMARY" })}
-              className="mt-8 w-full"
-            >
-              {acked ? "Waiting for other players…" : "Done"}
-            </PrimaryButton>
+                        <td
+                          className={`py-2 pr-2 ${win ? "text-green-700" : ""}`}
+                        >
+                          {p.name}
+                          {win ? " — Winner" : ""}
+                        </td>
+                        <td
+                          className={`py-2 pr-2 text-right font-mono ${win ? "text-green-700" : ""}`}
+                        >
+                          {ph.roundScores[p.id] ?? 0}
+                        </td>
+                        <td
+                          className={`py-2 text-right font-mono ${win ? "text-green-700" : ""}`}
+                        >
+                          {gs.totals[p.id] ?? 0}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <PrimaryButton
+                disabled={acked || !you}
+                onClick={() => void postMove({ type: "ACK_GAME_SUMMARY" })}
+                className="mt-8 w-full"
+              >
+                {acked ? "Waiting for other players…" : "Done"}
+              </PrimaryButton>
+            </div>
           </div>
         </div>
-      </div>
+      </RoundWhyGate>
+      </>
     );
   }
 
@@ -559,6 +607,8 @@ export function GameClient({ code }: { code: string }) {
     };
 
     return (
+      <>
+        {testScenarioBanner}
       <div className="mx-auto max-w-4xl px-4 py-16 text-center">
         <h1 className="text-2xl font-semibold text-stone-900">Game Complete</h1>
         <p className="mt-4 text-lg">
@@ -704,6 +754,7 @@ export function GameClient({ code }: { code: string }) {
           </Link>
         </p>
       </div>
+      </>
     );
   }
 
@@ -745,8 +796,11 @@ export function GameClient({ code }: { code: string }) {
 
   return (
     <>
+    {testScenarioBanner}
     <div
-      className={`mx-auto max-w-3xl px-4 pt-4 md:pt-8 ${
+      className={`mx-auto max-w-3xl px-4 ${
+        gs.testScenarioId ? "pt-11 md:pt-14" : "pt-4 md:pt-8"
+      } ${
         showFixedPlayBar
           ? "pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
           : "pb-6 md:pb-8"

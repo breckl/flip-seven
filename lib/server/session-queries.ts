@@ -9,7 +9,7 @@ export type PlayingSessionBody = {
   status: "playing" | "finished";
   code: string;
   hostPlayerId: string | null;
-  players: { id: string; name: string; seatOrder: number }[];
+  players: { id: string; name: string; isBot: boolean; seatOrder: number }[];
   game: { version: number; updatedAt: string; state: GameState };
   rematch?: RematchPayload;
 };
@@ -97,6 +97,7 @@ export async function getPlayingSessionBody(
     players: playerRows.map((p) => ({
       id: p.id,
       name: p.name,
+      isBot: p.isBot,
       seatOrder: p.seatOrder,
     })),
     game: {

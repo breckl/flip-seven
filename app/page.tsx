@@ -10,6 +10,7 @@ export default function Home() {
   const router = useRouter();
   const [tab, setTab] = useState<"create" | "join">("create");
   const [createName, setCreateName] = useState("");
+  const [createWithComputer, setCreateWithComputer] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [joinName, setJoinName] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -24,6 +25,7 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: createName.trim(),
+        addComputerPlayer: createWithComputer,
       }),
     });
     setBusy(false);
@@ -243,6 +245,14 @@ export default function Home() {
             >
               Create Game
             </PrimaryButton>
+            <label className="mt-3 flex items-center gap-2 text-sm text-stone-700">
+              <input
+                type="checkbox"
+                checked={createWithComputer}
+                onChange={(e) => setCreateWithComputer(e.target.checked)}
+              />
+              Add a computer player
+            </label>
           </div>
         ) : (
           <div className="px-3 pb-3 pt-5" role="tabpanel">

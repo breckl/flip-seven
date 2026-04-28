@@ -3,6 +3,11 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { games, sessions } from "@/db/schema";
 import { bootstrapDeal, createNewGame } from "@/lib/game/engine";
+import {
+  buildSecondChanceDuplicateTestScenario,
+  HOST_TEST_TRIGGER_SUBSTRING,
+} from "@/lib/game/test-scenarios";
+import { applyBotAutoplay } from "@/lib/server/bot";
 import { findSessionByCode, listPlayers } from "@/lib/server/session-queries";
 
 type RouteParams = { params: { code: string } };
@@ -42,9 +47,21 @@ export async function POST(req: Request, ctx: RouteParams) {
   }
 
   const seatIds = plist.map((p) => p.id);
+  const botIds = plist.filter((p) => p.isBot).map((p) => p.id);
   const dealerSeat = 0;
+
+  const hostPlayer = plist.find((p) => p.id === session.hostPlayerId);
+  const hostName = hostPlayer?.name ?? "";
+  const useDupSecondChanceTest =
+    hostName.includes(HOST_TEST_TRIGGER_SUBSTRING) && plist.length === 2;
+
   let state = createNewGame(seatIds, dealerSeat);
-  state = bootstrapDeal(state);
+  if (useDupSecondChanceTest) {
+    state = buildSecondChanceDuplicateTestScenario(state, session.hostPlayerId!);
+  } else {
+    state = bootstrapDeal(state);
+  }
+  state = applyBotAutoplay(state, botIds);
 
   const db = getDb();
   await db.transaction(async (tx) => {
