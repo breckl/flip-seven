@@ -61,6 +61,8 @@ function chooseHitOrStay(state: GameState, botId: string): ClientMove {
   }
 
   const currentScore = scoreBoard(board);
+  const hasAnyBoardValue =
+    board.nums.length > 0 || board.flatMods.length > 0 || board.hasX2 || board.secondChance;
   let bustOuts = 0;
   let deltaSum = 0;
   const seen = new Set(board.nums.map((c) => c.v));
@@ -73,14 +75,21 @@ function chooseHitOrStay(state: GameState, botId: string): ClientMove {
   const bustProb = bustOuts / draw.length;
   const expectedDelta = deltaSum / draw.length;
 
-  if (currentScore < 20) {
-    return bustProb > 0.55 && expectedDelta < 2 ? { type: "STAY" } : { type: "HIT" };
+  // Never bank an empty/zero board unless the deck is overwhelmingly dangerous.
+  if (!hasAnyBoardValue || currentScore <= 0) {
+    return bustProb >= 0.92 ? { type: "STAY" } : { type: "HIT" };
   }
+
+  // Early board-building: keep pressing for points.
+  if (currentScore < 20) {
+    return bustProb > 0.7 && expectedDelta < 0 ? { type: "STAY" } : { type: "HIT" };
+  }
+
   if (currentScore < 40) {
-    return expectedDelta > 0 || bustProb < 0.33 ? { type: "HIT" } : { type: "STAY" };
+    return expectedDelta > -0.25 || bustProb < 0.45 ? { type: "HIT" } : { type: "STAY" };
   }
   if (currentScore < 65) {
-    return expectedDelta > 2 && bustProb < 0.4 ? { type: "HIT" } : { type: "STAY" };
+    return expectedDelta > 1 || bustProb < 0.35 ? { type: "HIT" } : { type: "STAY" };
   }
   return expectedDelta > 4 && bustProb < 0.25 ? { type: "HIT" } : { type: "STAY" };
 }

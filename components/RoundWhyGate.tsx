@@ -28,8 +28,12 @@ export function RoundWhyGate({
 
   const lines =
     reason !== undefined ? roundEndExplanation(reason, nameOf) : null;
+  const shouldSkipOverlay = reason?.kind === "no_active_players";
   const showOverlay =
-    lines !== null && reason !== undefined && confirmedKey !== gateKey;
+    !shouldSkipOverlay &&
+    lines !== null &&
+    reason !== undefined &&
+    confirmedKey !== gateKey;
 
   return (
     <>
