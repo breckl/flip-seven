@@ -160,11 +160,9 @@ export function GroupFeedMessage({
       return (
         <p className="text-sm leading-relaxed text-stone-900">
           <span className={nameCls}>{actor}</span>
-          <span className="text-stone-900"> discarded a </span>
-          <span className={secondCls}>Second Chance</span>
           <span className="text-stone-900">
             {" "}
-            (already had one — no other player to give it to).
+            drew a Second Chance but discarded it — they already had one and no other player could take it.
           </span>
         </p>
       );

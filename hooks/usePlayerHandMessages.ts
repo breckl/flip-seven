@@ -214,7 +214,7 @@ export function usePlayerHandMessages(
       return;
     }
 
-    // --- Second Chance duplicate discarded (solo last active player) ---
+    // --- Extra Second Chance discarded (holder already has SC and no other player can take it) ---
     const feed = gs.groupFeed ?? [];
     for (const e of feed) {
       if (e.kind === "second_chance_discarded" && e.actorId === you) {
@@ -223,7 +223,8 @@ export function usePlayerHandMessages(
           id: `sc-dup-discard-${e.id}`,
           backgroundColor: scFill,
           borderColor: darkerOutline(scFill),
-          text: "You already have a Second Chance — the extra card was discarded.",
+          text:
+            "You drew a Second Chance, but it was discarded — you already have one and there’s no other player to give it to.",
         });
       }
     }

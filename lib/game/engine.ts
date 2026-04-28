@@ -299,6 +299,26 @@ function onlyActivePlayerId(state: GameState): string | null {
   return count === 1 ? last : null;
 }
 
+/**
+ * True if `targetPlayerId` already has Second Chance on the board and there is no *other*
+ * active player who could receive a Second Chance (everyone else inactive or already holding SC).
+ * The drawn Second Chance cannot be legally placed — discard it so play can continue.
+ */
+function mustDiscardDuplicateSecondChance(
+  state: GameState,
+  targetPlayerId: string,
+): boolean {
+  const tb = state.boards[targetPlayerId];
+  if (!tb?.secondChance) return false;
+  const alternateRecipientExists = state.seats.some(
+    (id) =>
+      id !== targetPlayerId &&
+      isActive(state.boards[id]) &&
+      !state.boards[id].secondChance,
+  );
+  return !alternateRecipientExists;
+}
+
 function collectRoundCardsToDiscard(state: GameState): Card[] {
   const out: Card[] = [];
   for (const id of state.seats) {
@@ -520,6 +540,7 @@ function runFlipThree(
       s = withFeedDrewCard(s, targetPid, c);
       s = maybeFeedFlip7(s, prevB, nextB, targetPid);
     } else if (c.v === "second") {
+      const secondCard = c as Card & { k: "a"; v: "second" };
       const b = s.boards[targetPid];
       if (!b.secondChance) {
         s = withFeedDrewCard(s, targetPid, c);
@@ -530,7 +551,15 @@ function runFlipThree(
         });
       } else {
         s = withFeedDrewCard(s, targetPid, c);
-        deferred.push(c);
+        if (mustDiscardDuplicateSecondChance(s, targetPid)) {
+          s = {
+            ...s,
+            discardPile: [...s.discardPile, secondCard],
+          };
+          s = withFeedSecondChanceDiscarded(s, targetPid, secondCard);
+        } else {
+          deferred.push(c);
+        }
       }
     } else {
       s = withFeedDrewCard(s, targetPid, c);
@@ -614,19 +643,17 @@ function applyActionCardAsChooser(
   const targetSeat = seatOf(s, targetPlayerId);
   const targetPid = targetPlayerId;
 
-  /** Last active player only: cannot hold two Second Chances or give one away — discard the extra. */
-  if (card.v === "second" && soloOnly) {
-    const tb = s.boards[targetPid];
-    if (tb.secondChance) {
-      let out: GameState = {
-        ...s,
-        discardPile: [...s.discardPile, card],
-      };
-      out = withFeedSecondChanceDiscarded(out, chooserPlayerId, card);
-      out = maybeFinishRound(out);
-      if (roundOrGameEnded(out.phase)) return out;
-      return afterChooseAction(out, resume, deferred, chooserSeat);
-    }
+  /** Extra Second Chance while holder already has one and no other active player can take it. */
+  if (card.v === "second" && mustDiscardDuplicateSecondChance(s, targetPid)) {
+    const secondCard = card as Card & { k: "a"; v: "second" };
+    let out: GameState = {
+      ...s,
+      discardPile: [...s.discardPile, secondCard],
+    };
+    out = withFeedSecondChanceDiscarded(out, chooserPlayerId, secondCard);
+    out = maybeFinishRound(out);
+    if (roundOrGameEnded(out.phase)) return out;
+    return afterChooseAction(out, resume, deferred, chooserSeat);
   }
 
   const sGift = withFeedGaveAction(s, chooserPlayerId, targetPlayerId, card);
