@@ -3,8 +3,7 @@ import { scoreBoard } from "@/lib/game/rules";
 import type { Card, GameState, PlayerBoard } from "@/lib/game/types";
 
 const MAX_AUTOPLAY_STEPS = 200;
-const BOT_TURN_WAIT_MIN_MS = 4_000;
-const BOT_TURN_WAIT_MAX_MS = 8_000;
+const BOT_TURN_WAIT_MS = 2_000;
 
 function sumNumbers(board: PlayerBoard): number {
   return board.nums.reduce((acc, c) => acc + (c.k === "n" ? c.v : 0), 0);
@@ -184,15 +183,10 @@ function isTurnDecisionMove(move: ClientMove): boolean {
   return move.type === "HIT" || move.type === "STAY" || move.type === "ACTION_TARGET";
 }
 
-function randomTurnWaitMs(): number {
-  const span = BOT_TURN_WAIT_MAX_MS - BOT_TURN_WAIT_MIN_MS;
-  return BOT_TURN_WAIT_MIN_MS + Math.floor(Math.random() * (span + 1));
-}
-
 /**
  * Run bot actions while respecting per-turn "thinking" delay.
  * - ACK-style housekeeping moves are immediate.
- * - HIT/STAY/ACTION_TARGET are delayed 4-8s each.
+ * - HIT/STAY/ACTION_TARGET are delayed 2s each.
  */
 export function applyBotAutoplay(state: GameState, botPlayerIds: string[], nowMs = Date.now()): GameState {
   if (botPlayerIds.length === 0) return state;
@@ -219,7 +213,7 @@ export function applyBotAutoplay(state: GameState, botPlayerIds: string[], nowMs
         ...next,
         botPendingTurn: {
           actorId: step.actorId,
-          executeAtMs: nowMs + randomTurnWaitMs(),
+          executeAtMs: nowMs + BOT_TURN_WAIT_MS,
         },
       };
       break;
