@@ -3,6 +3,8 @@ import { scoreBoard } from "@/lib/game/rules";
 import type { Card, GameState, PlayerBoard } from "@/lib/game/types";
 
 const MAX_AUTOPLAY_STEPS = 200;
+const BOT_TURN_WAIT_MIN_MS = 4_000;
+const BOT_TURN_WAIT_MAX_MS = 8_000;
 
 function sumNumbers(board: PlayerBoard): number {
   return board.nums.reduce((acc, c) => acc + (c.k === "n" ? c.v : 0), 0);
@@ -85,13 +87,13 @@ function chooseHitOrStay(state: GameState, botId: string): ClientMove {
     return bustProb > 0.7 && expectedDelta < 0 ? { type: "STAY" } : { type: "HIT" };
   }
 
-  if (currentScore < 40) {
-    return expectedDelta > -0.25 || bustProb < 0.45 ? { type: "HIT" } : { type: "STAY" };
+  if (currentScore < 35) {
+    return expectedDelta > 0 || bustProb < 0.38 ? { type: "HIT" } : { type: "STAY" };
   }
-  if (currentScore < 65) {
-    return expectedDelta > 1 || bustProb < 0.35 ? { type: "HIT" } : { type: "STAY" };
+  if (currentScore < 55) {
+    return expectedDelta > 1 || bustProb < 0.24 ? { type: "HIT" } : { type: "STAY" };
   }
-  return expectedDelta > 4 && bustProb < 0.25 ? { type: "HIT" } : { type: "STAY" };
+  return expectedDelta > 3 && bustProb < 0.15 ? { type: "HIT" } : { type: "STAY" };
 }
 
 function chooseTargetByThreat(
@@ -178,14 +180,55 @@ function nextBotMove(state: GameState, botPlayerIds: Set<string>): { actorId: st
   return null;
 }
 
-export function applyBotAutoplay(state: GameState, botPlayerIds: string[]): GameState {
+function isTurnDecisionMove(move: ClientMove): boolean {
+  return move.type === "HIT" || move.type === "STAY" || move.type === "ACTION_TARGET";
+}
+
+function randomTurnWaitMs(): number {
+  const span = BOT_TURN_WAIT_MAX_MS - BOT_TURN_WAIT_MIN_MS;
+  return BOT_TURN_WAIT_MIN_MS + Math.floor(Math.random() * (span + 1));
+}
+
+/**
+ * Run bot actions while respecting per-turn "thinking" delay.
+ * - ACK-style housekeeping moves are immediate.
+ * - HIT/STAY/ACTION_TARGET are delayed 4-8s each.
+ */
+export function applyBotAutoplay(state: GameState, botPlayerIds: string[], nowMs = Date.now()): GameState {
   if (botPlayerIds.length === 0) return state;
   const botSet = new Set(botPlayerIds);
   let next = state;
+
   for (let i = 0; i < MAX_AUTOPLAY_STEPS; i++) {
     const step = nextBotMove(next, botSet);
-    if (!step) break;
+    if (!step) {
+      if (next.botPendingTurn) {
+        next = { ...next, botPendingTurn: null };
+      }
+      break;
+    }
+
+    if (!isTurnDecisionMove(step.move)) {
+      next = applyMove(next, step.actorId, step.move);
+      continue;
+    }
+
+    const pending = next.botPendingTurn;
+    if (!pending || pending.actorId !== step.actorId) {
+      next = {
+        ...next,
+        botPendingTurn: {
+          actorId: step.actorId,
+          executeAtMs: nowMs + randomTurnWaitMs(),
+        },
+      };
+      break;
+    }
+
+    if (pending.executeAtMs > nowMs) break;
+
     next = applyMove(next, step.actorId, step.move);
+    next = { ...next, botPendingTurn: null };
   }
   return next;
 }

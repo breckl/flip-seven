@@ -61,6 +61,7 @@ export async function POST(req: Request, ctx: RouteParams) {
   } else {
     state = bootstrapDeal(state);
   }
+  state = { ...state, botPendingTurn: null };
   state = applyBotAutoplay(state, botIds);
 
   const db = getDb();

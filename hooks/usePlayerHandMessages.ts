@@ -69,7 +69,13 @@ function useHandMessageQueue() {
     };
   }, []);
 
-  return { messages, pushHandMessage };
+  const clearAll = useCallback(() => {
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current.clear();
+    setMessages([]);
+  }, []);
+
+  return { messages, pushHandMessage, clearAll };
 }
 
 type PostMove = (move: {
@@ -88,7 +94,7 @@ export function usePlayerHandMessages(
   playerId: string | null,
   postMove: PostMove,
 ) {
-  const { messages, pushHandMessage } = useHandMessageQueue();
+  const { messages, pushHandMessage, clearAll } = useHandMessageQueue();
 
   const pendingTargetKeyRef = useRef<string | null>(null);
   /** One bust_reveal handling per `round|player|version`; timer for delayed round-ending ACK */
@@ -124,6 +130,7 @@ export function usePlayerHandMessages(
       phase.t === "game_summary" ||
       phase.t === "game_over"
     ) {
+      clearAll();
       pendingTargetKeyRef.current = null;
       if (bustTimerRef.current != null) {
         clearTimeout(bustTimerRef.current);
@@ -143,6 +150,7 @@ export function usePlayerHandMessages(
 
     const roundIndex = gs.roundIndex;
     if (prevRoundIndexRef.current !== roundIndex) {
+      clearAll();
       prevRoundIndexRef.current = roundIndex;
       if (bustTimerRef.current != null) {
         clearTimeout(bustTimerRef.current);
@@ -313,7 +321,7 @@ export function usePlayerHandMessages(
       });
     }
     prevStatusRef.current = st;
-  }, [playingPayload, playerId, postMove, tryPush]);
+  }, [clearAll, playingPayload, playerId, postMove, tryPush]);
 
   useEffect(() => {
     if (!playingPayload || !playerId) return;

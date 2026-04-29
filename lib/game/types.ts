@@ -118,6 +118,8 @@ export type GameState = {
   groupFeed?: GroupFeedEntry[];
   /** Monotonic counter for feed entry ids */
   groupFeedSeq?: number;
+  /** Server-side bot pacing so bot turns feel human. */
+  botPendingTurn?: { actorId: string; executeAtMs: number } | null;
   /** Dev/test: which canned scenario was loaded (optional). */
   testScenarioId?: string;
 };
